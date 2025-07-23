@@ -4,9 +4,9 @@ from typing import Any, Dict, Optional
 import firebase_admin
 import requests
 import streamlit as st
-from config.firebase_config import initialize_firebase_admin
 from firebase_admin import auth
 
+from config.firebase_config import initialize_firebase_admin
 from utils.firebase_logger import get_firebase_logger
 from utils.session_manager import get_session_manager
 
@@ -478,6 +478,66 @@ def logout():
     """로그아웃"""
     session_manager = get_session_manager()
     session_manager.logout()
+
+
+def is_first_login() -> bool:
+    """현재 사용자가 첫 로그인인지 확인"""
+    try:
+        user_info = get_current_user()
+        if not user_info:
+            return False
+
+        uid = user_info.get("localId")
+        if not uid:
+            return False
+
+        logger = get_firebase_logger()
+        if not logger.is_available():
+            return False
+
+        # auth_logs에서 해당 사용자의 login 타입 로그를 조회
+        login_logs = logger.get_user_logs(uid, limit=10, collection_name="auth_logs")
+
+        # login 타입의 로그만 필터링
+        login_records = [log for log in login_logs if log.get("type") == "login"]
+
+        # 첫 번째 로그인이면 True
+        return len(login_records) <= 1
+
+    except Exception as e:
+        st.error(f"첫 로그인 확인 중 오류: {str(e)}")
+        return False
+
+
+def has_completed_onboarding() -> bool:
+    """사용자가 온보딩을 완료했는지 확인"""
+    try:
+        user_info = get_current_user()
+        if not user_info:
+            return False
+
+        uid = user_info.get("localId")
+        if not uid:
+            return False
+
+        logger = get_firebase_logger()
+        if not logger.is_available():
+            return False
+
+        # onboarding_completed 로그가 있는지 확인
+        onboarding_logs = logger.get_user_logs(
+            uid, limit=5, collection_name="activity_logs"
+        )
+
+        for log in onboarding_logs:
+            if log.get("type") == "onboarding_completed":
+                return True
+
+        return False
+
+    except Exception as e:
+        st.error(f"온보딩 완료 확인 중 오류: {str(e)}")
+        return False
 
 
 def require_auth(func):

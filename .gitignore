@@ -22,3 +22,4 @@ seoul_data/whatToEat_DB_socho_extra_raw.xlsx
 /legacy_data
 /crawler
 data/*.csv
+*.env

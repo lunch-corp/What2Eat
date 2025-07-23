@@ -2,10 +2,18 @@
 
 import streamlit as st
 from config.constants import LOGO_SMALL_IMG_PATH, LOGO_TITLE_IMG_PATH
+from pages.onboarding import OnboardingPage
 
 from utils.analytics import load_analytics
 from utils.app import What2EatApp
-from utils.auth import auth_form, check_authentication, get_current_user, logout
+from utils.auth import (
+    auth_form,
+    check_authentication,
+    get_current_user,
+    has_completed_onboarding,
+    is_first_login,
+    logout,
+)
 from utils.firebase_logger import get_firebase_logger
 from utils.pages import PageManager
 from utils.session_manager import get_session_manager
@@ -29,31 +37,23 @@ def login_page_fragment():
     with col2:
         st.image(LOGO_TITLE_IMG_PATH, width=300)
 
-    # st.markdown("---")
+    st.markdown("---")
 
-    # # 앱 소개
-    # st.markdown("""
-    # ## 🍽️ What2Eat에 오신 것을 환영합니다!
+    # 앱 소개
+    st.markdown("""
+    ## 🍽️ What2Eat에 오신 것을 환영합니다!
 
-    # **What2Eat**은 당신의 맛집 탐험을 도와주는 똑똑한 음식점 추천 서비스입니다.
+    **What2Eat**은 당신의 맛집 탐험을 도와주는 똑똑한 음식점 추천 서비스입니다.
 
-    # ### ✨ 주요 기능
-    # - 🎯 **개인 맞춤 추천**: 위치와 취향을 고려한 맞춤형 음식점 추천
-    # - 🗺️ **지도 기반 검색**: 원하는 반경 내에서 맛집 찾기
-    # - 🏆 **쩝슐랭 랭킹**: 검증된 맛집들의 등급별 랭킹
-    # - 📊 **개인 활동 분석**: 당신의 맛집 탐험 기록과 통계
-    # - 💬 **대화형 검색**: 자연스러운 대화로 맛집 찾기
+    ### ✨ 주요 기능
+    - 🎯 **개인 맞춤 추천**: 위치와 취향을 고려한 맞춤형 음식점 추천
+    - 🗺️ **지도 기반 검색**: 원하는 반경 내에서 맛집 찾기
+    - 🏆 **쩝슐랭 랭킹**: 검증된 맛집들의 등급별 랭킹
+    
+    🚀
+    """)
 
-    # ### 🔐 로그인이 필요한 이유
-    # - **개인화된 추천**: 당신의 취향을 학습하여 더 정확한 추천 제공
-    # - **활동 기록**: 방문한 맛집과 검색 기록을 안전하게 저장
-    # - **맞춤형 경험**: 개인별 설정과 즐겨찾기 관리
-    # - **데이터 보안**: 개인 정보와 활동 데이터의 안전한 보호
-
-    # 아래에서 로그인하거나 새 계정을 만들어 시작해보세요! 🚀
-    # """)
-
-    # st.markdown("---")
+    st.markdown("---")
 
     # 로그인 폼
     auth_form()
@@ -310,6 +310,15 @@ def main():
     # 로그인하지 않은 사용자는 로그인 페이지만 표시
     if not is_authenticated:
         login_page_fragment()
+        return
+
+    # 첫 로그인 사용자이고 온보딩을 완료하지 않은 경우 온보딩 페이지 표시
+    if is_first_login() and not has_completed_onboarding():
+        st.info(
+            "🎉 처음 방문하신 것을 환영합니다! 맞춤 추천을 위한 간단한 설정을 진행해주세요."
+        )
+        onboarding_page = OnboardingPage()
+        onboarding_page.render()
         return
 
     # 로그인된 사용자를 위한 메인 앱

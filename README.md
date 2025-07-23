@@ -1,77 +1,68 @@
-# What2Eat(머먹?)
+# What2Eat - 음식점 추천 시스템
 
+## 개요
+사용자의 위치와 선호도를 기반으로 음식점을 추천하는 시스템입니다.
 
-## 🍽️ About the Project
-**What2Eat** is a smarter way to rank restaurants, moving beyond simple averages and review counts. By incorporating reviewer traits, recency, and subjective biases, it calculates more reliable and nuanced scores to identify the best dining spots.
+## 설치 및 실행
 
-### Key Features:
+### 1. 의존성 설치
+```bash
+pip install -r requirements.txt
+```
 
-- Chatbot interface for easy interaction
-- Recommendations based on location and food preferences
-- **Personalized Adjustments**: Scores reflect reviewer habits, recency, and credibility.
-- **Robust Rankings**: Bayesian adjustments reduce the impact of outliers and small sample sizes.
-- **Manipulation-Resistant**: Incorporates reviewer activity to mitigate spam or biased reviews.
+### 2. Firebase 설정
 
-## 🚀 Getting Started
+#### Firebase Web API Key 설정
+실제 비밀번호 기반 로그인을 사용하려면 Firebase Web API Key가 필요합니다.
 
-You can access What2Eat through the following links:
+**방법 1: 환경 변수 사용 (권장)**
+1. Firebase Console (https://console.firebase.google.com)에 접속
+2. 프로젝트 선택
+3. 프로젝트 설정 → 일반 탭
+4. "웹 API 키" 값을 복사
+5. `example.env` 파일을 `.env`로 복사하고 API 키 입력:
+   ```bash
+   cp example.env .env
+   # .env 파일에서 FIREBASE_WEB_API_KEY 값을 실제 키로 교체
+   ```
+6. 환경 변수 로드:
+   ```bash
+   export $(cat .env | xargs)  # Linux/macOS
+   ```
 
-- [What2Eat Chat Version](https://what2eat-chat.streamlit.app/)
-<!-- - [What2Eat Map Version](https://what2eat.streamlit.app/) -->
-- [What2Eat LLM Version](https://laas.wanted.co.kr/sandbox/share?project=PROMPTHON_PRJ_463&hash=f11097aa25dde2ef411ac331f47c1a3d1199331e8c4d10adebd7750576f442ff)
+**방법 2: 직접 코드 수정**
+`src/streamlit_test.py` 파일에서 다음 라인을 수정:
+```python
+FIREBASE_WEB_API_KEY = "your-actual-web-api-key-here"  # 실제 Web API Key로 교체
+```
 
-## 🛠️ Built With
+#### Firebase Authentication 활성화
+1. Firebase Console → Authentication → Sign-in method
+2. 이메일/비밀번호 로그인 방식 활성화
 
-- Python
-- Streamlit
-- Kakao Map API
+### 3. 실행
+```bash
+streamlit run src/streamlit_test.py
+```
 
-## 📊 How It Works
+## 기능
 
-1. **Data Collection**: Over 1.5 million reviews from 1,650,000+ Seoul restaurants were collected from Kakao Map.
-   - Data includes reviewer ID, scores, review text, timestamps, and additional metadata like reviewer badges or levels.
+### 인증 시스템
+- **회원가입**: 이메일/비밀번호 기반 계정 생성
+- **로그인**: Firebase Authentication REST API를 통한 실제 비밀번호 검증
+- **로그아웃**: 세션 관리
+- **보안**: 
+  - 비밀번호 6자 이상 요구
+  - 비밀번호 확인 검증
+  - Firebase 보안 토큰 사용
 
-2. **Review Analysis**: 
-   - Each review is evaluated using three factors:
-     - **Reviewer Bias**: How a review’s score compares to the reviewer’s typical scoring pattern (`score_scaled`).
-     - **Recency**: Reviews written within the last 3 months are weighted higher, with older reviews gradually losing weight (`date_scaled`).
-     - **Reviewer Credibility**: Reviewers with higher activity levels or badges receive more influence (`badge_scaled`).
-   - These factors are normalized and combined into a **Combined Score** for each review.
+### 활동 로그
+- 위치 기반 검색 로그
+- 카테고리 선택 로그  
+- 음식점 클릭 로그
+- 시간순 정렬된 활동 내역 조회
 
-3. **Ranking System**:
-   - **Individual Review Aggregation**:
-     - Reviews for each restaurant are combined using **Bayesian Adjusted Averages**, ensuring restaurants with fewer reviews are not unfairly overrepresented.
-   - **Final Score Calculation**:
-     \[
-     \text{Restaurant Score} = \frac{(\mu \times k) + (x} \times N)}{k + N}
-     \]
-     - \( \mu \): Average of all restaurants’ combined scores.
-     - \( k \): Minimum review count threshold (e.g., 5).
-     - \( x \): Restaurant’s average combined score.
-     - \( N \): Number of reviews for the restaurant.
-   
-4. **Display Criteria**:
-   - Restaurants are ranked by their **Bayesian Adjusted Scores**.
-   - Additional filters include:
-     - **Cuisine Type**: Narrow down results by category (e.g., Korean, Italian, Cafes).
-     - **Location**: Filter by specific areas or neighborhoods.
-   - Warnings are displayed for restaurants with over 10% meaningful negative reviews
-
-## 📝 Blog Post
-
-For more detailed information about the development process and methodologies, check out our [blog post](https://learningnrunning.github.io/post/tech/review/2024-12-30-Aggregate-restaurant-ratings-data/).
-
-## 🤝 Contributing
-
-Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/learningnrunning/What2Eat/issues).
-
-## 📫 Contact
-
-Seongrok Kim- [max_sungrok@naver.com]
-
-Project Link: [https://github.com/learningnrunning/What2Eat](https://github.com/learningnrunning/What2Eat)
-
-## 🙏 Acknowledgements
-
-- [Kakao Map](https://map.kakao.com/) for providing the initial data
-- All the food lovers who contributed reviews and ratings
+## 보안 주의사항
+- Firebase Web API Key는 공개 저장소에 올리지 마세요
+- 환경 변수나 별도 설정 파일을 사용하는 것을 권장합니다
+- 프로덕션 환경에서는 Firebase 보안 규칙을 적절히 설정하세요 
