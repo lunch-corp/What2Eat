@@ -6,175 +6,148 @@ from typing import Any, Dict, List, Optional
 import streamlit as st
 
 from utils.auth import get_current_user
-from utils.firebase_logger import get_firebase_logger
+from utils.data_processing import get_filtered_data
 from utils.firebase_logger import get_firebase_logger
 
 
 class OnboardingManager:
     """온보딩 관련 로직을 관리하는 클래스"""
 
-    def __init__(self):
+    def __init__(self, app=None):
         self.logger = get_firebase_logger()
+        self.app = app
 
     def get_popular_restaurants_by_location(
         self, location: str, limit: int = 10
     ) -> List[Dict[str, Any]]:
-        """위치 기반 인기 음식점 조회 (실제로는 DB에서 조회)"""
-        # 현재는 샘플 데이터를 반환, 실제로는 위치 기반 DB 쿼리 수행
-        sample_restaurants = [
-            {
-                "id": "rest_1",
-                "name": "맛있는 한식당",
-                "category": "한식",
-                "address": f"{location} 근처",
-                "rating": 4.5,
-                "review_count": 234,
-                "image_url": "https://via.placeholder.com/200x150/FF6B6B/FFFFFF?text=Korean",
-                "price_range": "2-3만원",
-                "specialties": ["김치찌개", "불고기", "비빔밥"],
-            },
-            {
-                "id": "rest_2",
-                "name": "이탈리안 파스타",
-                "category": "양식",
-                "address": f"{location} 근처",
-                "rating": 4.2,
-                "review_count": 156,
-                "image_url": "https://via.placeholder.com/200x150/4ECDC4/FFFFFF?text=Italian",
-                "price_range": "3-4만원",
-                "specialties": ["까르보나라", "아라비아타", "알리오올리오"],
-            },
-            {
-                "id": "rest_3",
-                "name": "스시 전문점",
-                "category": "일식",
-                "address": f"{location} 근처",
-                "rating": 4.7,
-                "review_count": 89,
-                "image_url": "https://via.placeholder.com/200x150/45B7D1/FFFFFF?text=Sushi",
-                "price_range": "5-7만원",
-                "specialties": ["오마카세", "초밥", "사시미"],
-            },
-            {
-                "id": "rest_4",
-                "name": "매운 떡볶이",
-                "category": "분식",
-                "address": f"{location} 근처",
-                "rating": 4.1,
-                "review_count": 312,
-                "image_url": "https://via.placeholder.com/200x150/F7DC6F/FFFFFF?text=Tteok",
-                "price_range": "1-2만원",
-                "specialties": ["떡볶이", "튀김", "순대"],
-            },
-            {
-                "id": "rest_5",
-                "name": "고급 스테이크하우스",
-                "category": "양식",
-                "address": f"{location} 근처",
-                "rating": 4.8,
-                "review_count": 67,
-                "image_url": "https://via.placeholder.com/200x150/E74C3C/FFFFFF?text=Steak",
-                "price_range": "10만원 이상",
-                "specialties": ["토마호크", "티본스테이크", "와인"],
-            },
-            {
-                "id": "rest_6",
-                "name": "중화요리 전문점",
-                "category": "중식",
-                "address": f"{location} 근처",
-                "rating": 4.3,
-                "review_count": 178,
-                "image_url": "https://via.placeholder.com/200x150/9B59B6/FFFFFF?text=Chinese",
-                "price_range": "2-4만원",
-                "specialties": ["짜장면", "짬뽕", "탕수육"],
-            },
-            {
-                "id": "rest_7",
-                "name": "타이 레스토랑",
-                "category": "동남아식",
-                "address": f"{location} 근처",
-                "rating": 4.4,
-                "review_count": 95,
-                "image_url": "https://via.placeholder.com/200x150/27AE60/FFFFFF?text=Thai",
-                "price_range": "3-5만원",
-                "specialties": ["팟타이", "똠얌꿍", "그린커리"],
-            },
-        ]
+        """위치 기반 인기 음식점 조회 (2km 반경, diner_grade 높은 순)"""
+        if not self.app or not hasattr(self.app, "df_diner"):
+            # app 인스턴스나 df_diner가 없는 경우 빈 리스트 반환
+            return []
 
-        return sample_restaurants[:limit]
+        # 현재 사용자 위치 정보 가져오기
+        if "user_lat" not in st.session_state or "user_lon" not in st.session_state:
+            return []
+
+        user_lat = st.session_state.user_lat
+        user_lon = st.session_state.user_lon
+
+        # 2km 반경 내 데이터 필터링
+        df_geo_filtered = get_filtered_data(
+            self.app.df_diner, user_lat, user_lon, max_radius=2
+        )
+
+        # diner_grade가 있는 데이터만 필터링
+        df_geo_filtered = df_geo_filtered[df_geo_filtered["diner_grade"].notna()]
+
+        # diner_grade가 1 이상인 찐맛집만 필터링
+        df_quality = df_geo_filtered[df_geo_filtered["diner_grade"] >= 1]
+
+        if len(df_quality) == 0:
+            return []
+
+        # diner_grade 높은 순으로 정렬
+        df_sorted = df_quality.sort_values(by="diner_grade", ascending=False)
+
+        # limit 개수만큼 선택
+        df_selected = df_sorted.head(limit)
+
+        # 결과를 딕셔너리 리스트로 변환
+        restaurants = []
+        for _, row in df_selected.iterrows():
+            restaurant = {
+                "id": str(row.get("diner_idx", "")),
+                "name": row.get("diner_name", ""),
+                "category": row.get("diner_category_large", "카테고리 정보 없음"),
+                "diner_category_large": row.get("diner_category_large", ""),
+                "address": row.get("diner_num_address", f"{location} 근처"),
+                "rating": float(row.get("diner_review_avg", 0)),
+                "review_count": int(row.get("diner_review_cnt", 0)),
+                "price_range": "정보 없음",
+                "specialties": row.get("diner_menu_name", [])[:3]
+                if row.get("diner_menu_name")
+                else [],
+                "distance": round(row.get("distance", 0), 1),
+            }
+            restaurants.append(restaurant)
+
+        return restaurants
 
     def get_similar_restaurants(
         self, restaurant_id: str, limit: int = 3
     ) -> List[Dict[str, Any]]:
-        """유사 음식점 조회 (실제로는 추천 알고리즘 사용)"""
-        similar_data = {
-            "rest_1": [  # 한식당과 유사한 음식점
-                {
-                    "id": "similar_1_1",
-                    "name": "전통 한정식",
-                    "category": "한식",
-                    "rating": 4.6,
-                    "specialties": ["한정식", "전통요리"],
-                },
-                {
-                    "id": "similar_1_2",
-                    "name": "김치찌개 전문점",
-                    "category": "한식",
-                    "rating": 4.2,
-                    "specialties": ["김치찌개", "된장찌개"],
-                },
-            ],
-            "rest_2": [  # 이탈리안과 유사한 음식점
-                {
-                    "id": "similar_2_1",
-                    "name": "피자 마르게리타",
-                    "category": "양식",
-                    "rating": 4.3,
-                    "specialties": ["나폴리피자", "마르게리타"],
-                },
-                {
-                    "id": "similar_2_2",
-                    "name": "리조또 하우스",
-                    "category": "양식",
-                    "rating": 4.5,
-                    "specialties": ["트러플리조또", "해산물리조또"],
-                },
-            ],
-            "rest_3": [  # 스시와 유사한 음식점
-                {
-                    "id": "similar_3_1",
-                    "name": "이자카야",
-                    "category": "일식",
-                    "rating": 4.4,
-                    "specialties": ["사케", "안주", "야키토리"],
-                },
-                {
-                    "id": "similar_3_2",
-                    "name": "사시미 전문점",
-                    "category": "일식",
-                    "rating": 4.6,
-                    "specialties": ["참치", "광어", "연어"],
-                },
-            ],
-            "rest_4": [  # 분식과 유사한 음식점
-                {
-                    "id": "similar_4_1",
-                    "name": "치킨 전문점",
-                    "category": "치킨",
-                    "rating": 4.2,
-                    "specialties": ["양념치킨", "후라이드"],
-                },
-                {
-                    "id": "similar_4_2",
-                    "name": "족발보쌈",
-                    "category": "한식",
-                    "rating": 4.3,
-                    "specialties": ["족발", "보쌈", "막국수"],
-                },
-            ],
-        }
+        """유사 음식점 조회 (같은 diner_category_large, diner_grade 높은 순)"""
+        if not self.app or not hasattr(self.app, "df_diner"):
+            return []
 
-        return similar_data.get(restaurant_id, [])[:limit]
+        # 현재 사용자 위치 정보 가져오기
+        if "user_lat" not in st.session_state or "user_lon" not in st.session_state:
+            return []
+
+        user_lat = st.session_state.user_lat
+        user_lon = st.session_state.user_lon
+
+        # 선택된 음식점 정보 찾기
+        try:
+            selected_restaurant = self.app.df_diner[
+                self.app.df_diner["diner_idx"].astype(str) == restaurant_id
+            ]
+
+            if len(selected_restaurant) == 0:
+                return []
+
+            selected_category = selected_restaurant.iloc[0]["diner_category_large"]
+
+        except Exception:
+            return []
+
+        # 2km 반경 내 데이터 필터링
+        df_geo_filtered = get_filtered_data(
+            self.app.df_diner, user_lat, user_lon, max_radius=2
+        )
+
+        # 같은 카테고리의 음식점만 필터링
+        df_same_category = df_geo_filtered[
+            df_geo_filtered["diner_category_large"] == selected_category
+        ]
+
+        # 선택된 음식점 제외
+        df_same_category = df_same_category[
+            df_same_category["diner_idx"].astype(str) != restaurant_id
+        ]
+
+        # diner_grade가 있는 데이터만 필터링
+        df_same_category = df_same_category[df_same_category["diner_grade"].notna()]
+
+        # diner_grade가 1 이상인 찐맛집만 필터링
+        df_quality = df_same_category[df_same_category["diner_grade"] >= 1]
+
+        if len(df_quality) == 0:
+            return []
+
+        # diner_grade 높은 순으로 정렬
+        df_sorted = df_quality.sort_values(by="diner_grade", ascending=False)
+
+        # limit 개수만큼 선택
+        df_selected = df_sorted.head(limit)
+
+        # 결과를 딕셔너리 리스트로 변환
+        similar_restaurants = []
+        for _, row in df_selected.iterrows():
+            restaurant = {
+                "id": str(row.get("diner_idx", "")),
+                "name": row.get("diner_name", ""),
+                "category": row.get("diner_category_large", ""),
+                "rating": float(row.get("diner_grade", 0)),
+                "specialties": row.get("diner_menu_name", [])[:2]
+                if row.get("diner_menu_name")
+                else [],
+                "distance": round(row.get("distance", 0), 1),
+                "review_count": int(row.get("diner_review_cnt", 0)),
+            }
+            similar_restaurants.append(restaurant)
+
+        return similar_restaurants
 
     def save_user_profile(
         self, profile_data: Dict[str, Any], ratings_data: Dict[str, int]
@@ -408,10 +381,10 @@ class OnboardingManager:
         return analysis
 
 
-# 전역 인스턴스
-onboarding_manager = OnboardingManager()
+# 전역 인스턴스 제거
+# onboarding_manager = OnboardingManager()
 
 
-def get_onboarding_manager() -> OnboardingManager:
+def get_onboarding_manager(app=None) -> OnboardingManager:
     """온보딩 매니저 인스턴스 반환"""
-    return onboarding_manager
+    return OnboardingManager(app)

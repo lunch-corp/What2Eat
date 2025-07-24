@@ -10,9 +10,9 @@ from utils.onboarding import get_onboarding_manager
 class OnboardingPage:
     """온보딩 페이지 클래스"""
 
-    def __init__(self):
+    def __init__(self, app=None):
         self.logger = get_firebase_logger()
-        self.onboarding_manager = get_onboarding_manager()
+        self.onboarding_manager = get_onboarding_manager(app)
         self.min_ratings_required = 5  # 최소 평가 개수
 
         # 온보딩 단계 초기화
@@ -94,30 +94,24 @@ class OnboardingPage:
         현재 위치 또는 자주 가시는 동네를 입력해주시면 됩니다.
         """)
 
-        # 위치 입력 방법 선택
-        location_method = st.radio(
-            "위치 설정 방법을 선택해주세요:", ["직접 입력", "현재 위치 사용"]
-        )
+        # change_location 다이얼로그를 활용하여 위치를 설정합니다.
+        st.markdown("#### 위치를 설정해주세요")
+        if st.button("📍 위치 설정/변경하기", use_container_width=True):
+            from utils.dialogs import change_location
 
-        if location_method == "직접 입력":
-            location = st.text_input(
-                "동네를 입력해주세요",
-                placeholder="예: 강남구 신사동, 마포구 홍대, 종로구 명동",
-                value=st.session_state.user_profile.get("location", ""),
-            )
-
-            if location:
-                st.session_state.user_profile["location"] = location
-                st.session_state.user_profile["location_method"] = "manual"
-                st.success(f"📍 설정된 위치: {location}")
-
-        else:
-            if st.button("📍 현재 위치 사용하기"):
-                # 실제로는 geolocation API나 IP 기반 위치 확인
-                # 임시로 서울로 설정
-                st.session_state.user_profile["location"] = "서울특별시"
+            user_lat, user_lon, address = change_location()
+            if address:
+                st.session_state.user_lat, st.session_state.user_lon = (
+                    user_lat,
+                    user_lon,
+                )
+                st.session_state.user_profile["location"] = address
                 st.session_state.user_profile["location_method"] = "auto"
-                st.success("📍 현재 위치가 설정되었습니다: 서울특별시")
+                st.success(f"📍 설정된 위치: {address}")
+
+        # 이미 위치가 설정되어 있다면 표시
+        if st.session_state.user_profile.get("location"):
+            st.info(f"현재 설정된 위치: {st.session_state.user_profile['location']}")
 
         # 다음 단계 버튼
         col1, col2 = st.columns([1, 1])
@@ -286,12 +280,13 @@ class OnboardingPage:
 
         # 선호하는 음식 유형
         st.markdown("### 🍽️ 어떤 음식을 주로 좋아하시나요?")
-
+        # TODO: diner_large_category로 구성
         food_preferences = st.multiselect(
             "선호하는 음식 종류 (복수 선택 가능)",
             ["한식", "중식", "일식", "양식", "동남아식", "인도식", "멕시코식", "기타"],
             default=st.session_state.user_profile.get("food_preferences", []),
         )
+        # TODO: diner_large_category 중 클릭하면 그 카테고리가 속한 sub_category 목록 표시
         st.session_state.user_profile["food_preferences"] = food_preferences
 
         # 다음 단계 버튼
@@ -443,8 +438,9 @@ class OnboardingPage:
             )
 
             st.markdown("**👤 기본 정보**")
+            # TODO: 연령대 계산 방법 수정
             st.write(
-                f"• 연령대: {2024 - st.session_state.user_profile.get('birth_year', 2000)}세"
+                f"• 연령대: {2025 - st.session_state.user_profile.get('birth_year', 2000)}세"
             )
             st.write(f"• 성별: {st.session_state.user_profile.get('gender', '미설정')}")
             st.write(

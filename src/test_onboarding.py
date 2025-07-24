@@ -4,10 +4,9 @@
 """
 
 import streamlit as st
+from pages.onboarding import OnboardingPage
 
-
-from utils.auth import get_current_user, has_completed_onboarding, is_first_login
-
+from utils.app import What2EatApp
 from utils.auth import get_current_user, has_completed_onboarding, is_first_login
 
 
@@ -73,7 +72,9 @@ def main():
             st.markdown("---")
             st.info("온보딩 페이지를 표시합니다...")
 
-            onboarding_page = OnboardingPage()
+            # app 인스턴스 생성 후 온보딩 페이지에 전달
+            app = What2EatApp()
+            onboarding_page = OnboardingPage(app)
             onboarding_page.render()
         else:
             st.markdown("---")

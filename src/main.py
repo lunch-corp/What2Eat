@@ -1,9 +1,9 @@
 # src/main.py
 
 import streamlit as st
+
 from config.constants import LOGO_SMALL_IMG_PATH, LOGO_TITLE_IMG_PATH
 from pages.onboarding import OnboardingPage
-
 from utils.analytics import load_analytics
 from utils.app import What2EatApp
 from utils.auth import (
@@ -317,7 +317,9 @@ def main():
         st.info(
             "🎉 처음 방문하신 것을 환영합니다! 맞춤 추천을 위한 간단한 설정을 진행해주세요."
         )
-        onboarding_page = OnboardingPage()
+        # 온보딩에서도 app 인스턴스가 필요하므로 먼저 생성
+        app = What2EatApp()
+        onboarding_page = OnboardingPage(app)
         onboarding_page.render()
         return
 
