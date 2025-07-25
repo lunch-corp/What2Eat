@@ -3,6 +3,7 @@
 import streamlit as st
 
 from utils.auth import get_current_user
+from utils.category_manager import get_category_manager
 from utils.firebase_logger import get_firebase_logger
 from utils.onboarding import get_onboarding_manager
 
@@ -13,6 +14,7 @@ class OnboardingPage:
     def __init__(self, app=None):
         self.logger = get_firebase_logger()
         self.onboarding_manager = get_onboarding_manager(app)
+        self.category_manager = get_category_manager(app)
         self.min_ratings_required = 5  # 최소 평가 개수
 
         # 온보딩 단계 초기화
@@ -25,6 +27,133 @@ class OnboardingPage:
 
         if "restaurant_ratings" not in st.session_state:
             st.session_state.restaurant_ratings = {}
+
+    def _handle_current_location(self):
+        """현재 위치 찾기 helper 함수"""
+        from streamlit_geolocation import streamlit_geolocation
+
+        from utils.geolocation import geocode, save_user_location
+
+        with st.spinner("📍 현재 위치를 찾는 중입니다..."):
+            location = streamlit_geolocation()
+            if location["latitude"] is not None and location["longitude"] is not None:
+                st.session_state.user_lat, st.session_state.user_lon = (
+                    location["latitude"],
+                    location["longitude"],
+                )
+                st.session_state.address = geocode(
+                    st.session_state.user_lon, st.session_state.user_lat
+                )
+
+                # Firestore에 위치 저장
+                save_user_location(
+                    st.session_state.address,
+                    st.session_state.user_lat,
+                    st.session_state.user_lon,
+                )
+
+                # 온보딩 프로필에 저장
+                self._save_location_to_profile(st.session_state.address, "geolocation")
+
+                st.success("✅ 위치를 찾았습니다!")
+            else:
+                st.error("위 버튼을 눌러 현위치를 확인해보세요.")
+
+    def _handle_keyword_search(self, search_text):
+        """키워드 검색 처리 helper 함수"""
+        import requests
+
+        from config.constants import KAKAO_API_HEADERS, KAKAO_API_URL
+        from utils.geolocation import save_user_location
+
+        params = {"query": search_text, "size": 1}
+        response = requests.get(KAKAO_API_URL, headers=KAKAO_API_HEADERS, params=params)
+
+        if response.status_code == 200:
+            response_json = response.json()
+            response_doc_list = response_json["documents"]
+            if response_doc_list:
+                response_doc = response_doc_list[0]
+                address = response_doc["address_name"]
+                lat = float(response_doc["y"])
+                lon = float(response_doc["x"])
+
+                # 세션 상태에 저장
+                st.session_state.address = address
+                st.session_state.user_lat, st.session_state.user_lon = lat, lon
+
+                # Firestore에 위치 저장
+                save_user_location(address, lat, lon)
+
+                # 온보딩 프로필에 저장
+                self._save_location_to_profile(address, "search")
+
+                st.success(f"✅ 위치를 찾았습니다: {address}")
+                st.rerun()
+            else:
+                st.warning("다른 검색어를 입력해봐...")
+        else:
+            st.error("다른 검색어를 입력해봐...")
+
+    def _save_location_to_profile(self, address, method):
+        """온보딩 프로필에 위치 정보 저장 helper 함수"""
+        st.session_state.user_profile["location"] = address
+        st.session_state.user_profile["location_method"] = method
+
+    def _render_location_controls(self):
+        """위치 설정 컨트롤 렌더링 helper 함수"""
+        option = st.radio(
+            "위치를 선택하세요",
+            ("키워드로 검색으로 찾기(강남역 or 강남대로 328)", "주변에서 찾기"),
+            key="onboarding_location_option",
+        )
+
+        if option == "주변에서 찾기":
+            self._handle_current_location()
+
+        elif option == "키워드로 검색으로 찾기(강남역 or 강남대로 328)":
+            # session_state 초기화
+            if "onboarding_last_search" not in st.session_state:
+                st.session_state.onboarding_last_search = ""
+
+            search_region_text = st.text_input(
+                "주소나 키워드로 입력해줘",
+                key="onboarding_search_input",
+                placeholder="예: 강남역, 강남대로 328, 마포구 홍대",
+            )
+            search_clicked = st.button("검색", key="onboarding_search_button")
+
+            # 검색 버튼을 클릭했거나 새로운 검색어로 엔터를 눌렀을 때
+            if search_clicked or (
+                search_region_text
+                and search_region_text != st.session_state.onboarding_last_search
+            ):
+                st.session_state.onboarding_last_search = search_region_text
+                self._handle_keyword_search(search_region_text)
+
+    def _render_navigation_buttons(
+        self,
+        prev_step,
+        next_step,
+        next_condition=True,
+        next_label="다음 ▶",
+        disabled_label=None,
+    ):
+        """네비게이션 버튼 렌더링 helper 함수"""
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            if st.button("◀ 이전", use_container_width=True):
+                st.session_state.onboarding_step = prev_step
+                st.rerun()
+
+        with col2:
+            if next_condition:
+                if st.button(next_label, use_container_width=True, type="primary"):
+                    st.session_state.onboarding_step = next_step
+                    st.rerun()
+            else:
+                button_text = disabled_label or "조건을 먼저 완료해주세요"
+                st.button(button_text, disabled=True, use_container_width=True)
 
     def render(self):
         """온보딩 페이지 렌더링"""
@@ -94,41 +223,20 @@ class OnboardingPage:
         현재 위치 또는 자주 가시는 동네를 입력해주시면 됩니다.
         """)
 
-        # change_location 다이얼로그를 활용하여 위치를 설정합니다.
+        # 기존 geolocation 함수들을 활용하여 위치를 설정합니다.
         st.markdown("#### 위치를 설정해주세요")
-        if st.button("📍 위치 설정/변경하기", use_container_width=True):
-            from utils.dialogs import change_location
 
-            user_lat, user_lon, address = change_location()
-            if address:
-                st.session_state.user_lat, st.session_state.user_lon = (
-                    user_lat,
-                    user_lon,
-                )
-                st.session_state.user_profile["location"] = address
-                st.session_state.user_profile["location_method"] = "auto"
-                st.success(f"📍 설정된 위치: {address}")
+        self._render_location_controls()
 
         # 이미 위치가 설정되어 있다면 표시
         if st.session_state.user_profile.get("location"):
-            st.info(f"현재 설정된 위치: {st.session_state.user_profile['location']}")
+            st.info(f"✅ 현재 설정된 위치: {st.session_state.user_profile['location']}")
 
         # 다음 단계 버튼
-        col1, col2 = st.columns([1, 1])
-        with col1:
-            if st.button("◀ 이전", use_container_width=True):
-                st.session_state.onboarding_step = 0
-                st.rerun()
-
-        with col2:
-            if st.session_state.user_profile.get("location"):
-                if st.button("다음 ▶", use_container_width=True, type="primary"):
-                    st.session_state.onboarding_step = 2
-                    st.rerun()
-            else:
-                st.button(
-                    "위치를 먼저 설정해주세요", disabled=True, use_container_width=True
-                )
+        location_set = bool(st.session_state.user_profile.get("location"))
+        self._render_navigation_buttons(
+            0, 2, next_condition=location_set, disabled_label="위치를 먼저 설정해주세요"
+        )
 
     def _render_basic_info_step(self):
         """기본 정보 수집 단계"""
@@ -221,16 +329,7 @@ class OnboardingPage:
             st.session_state.user_profile["special_budget"] = special_budget
 
         # 다음 단계 버튼
-        col1, col2 = st.columns([1, 1])
-        with col1:
-            if st.button("◀ 이전", use_container_width=True):
-                st.session_state.onboarding_step = 1
-                st.rerun()
-
-        with col2:
-            if st.button("다음 ▶", use_container_width=True, type="primary"):
-                st.session_state.onboarding_step = 3
-                st.rerun()
+        self._render_navigation_buttons(1, 3)
 
     def _render_taste_preferences_step(self):
         """취향 정보 수집 단계"""
@@ -280,26 +379,98 @@ class OnboardingPage:
 
         # 선호하는 음식 유형
         st.markdown("### 🍽️ 어떤 음식을 주로 좋아하시나요?")
-        # TODO: diner_large_category로 구성
-        food_preferences = st.multiselect(
-            "선호하는 음식 종류 (복수 선택 가능)",
-            ["한식", "중식", "일식", "양식", "동남아식", "인도식", "멕시코식", "기타"],
-            default=st.session_state.user_profile.get("food_preferences", []),
-        )
-        # TODO: diner_large_category 중 클릭하면 그 카테고리가 속한 sub_category 목록 표시
-        st.session_state.user_profile["food_preferences"] = food_preferences
+
+        # 카테고리 매니저에서 대분류 카테고리 가져오기
+        large_categories = self.category_manager.get_large_categories()
+
+        # 사용자 선택 상태 초기화
+        if "selected_large_categories" not in st.session_state:
+            st.session_state.selected_large_categories = []
+        if "selected_middle_categories" not in st.session_state:
+            st.session_state.selected_middle_categories = {}
+
+        st.markdown("#### 🏷️ 주요 음식 카테고리")
+        st.caption("관심 있는 음식 종류를 선택해주세요 (복수 선택 가능)")
+
+        # 대분류 카테고리 선택
+        selected_large = []
+
+        # 3열로 구성하여 카테고리 표시
+        cols = st.columns(3)
+        for i, category in enumerate(large_categories):
+            col_idx = i % 3
+            with cols[col_idx]:
+                display_name = self.category_manager.get_category_display_name(
+                    category["name"], category["count"]
+                )
+
+                is_selected = st.checkbox(
+                    display_name,
+                    value=category["name"]
+                    in st.session_state.user_profile.get("food_preferences_large", []),
+                    key=f"large_cat_{category['name']}",
+                )
+
+                if is_selected:
+                    selected_large.append(category["name"])
+
+        # 선택된 대분류에 대한 중분류 선택
+        st.session_state.selected_large_categories = selected_large
+
+        selected_middle_all = {}
+
+        if selected_large:
+            st.markdown("#### 🎯 세부 카테고리")
+            st.caption("선택한 음식 종류의 세부 카테고리를 추가로 선택할 수 있습니다")
+
+            for large_cat in selected_large:
+                middle_categories = self.category_manager.get_middle_categories(
+                    large_cat
+                )
+
+                if middle_categories:
+                    with st.expander(f"📂 {large_cat} 세부 카테고리", expanded=False):
+                        selected_middle = []
+
+                        # 중분류도 3열로 구성
+                        middle_cols = st.columns(3)
+                        for j, middle_cat in enumerate(middle_categories):
+                            col_idx = j % 3
+                            with middle_cols[col_idx]:
+                                display_name = (
+                                    self.category_manager.get_category_display_name(
+                                        middle_cat["name"], middle_cat["count"]
+                                    )
+                                )
+
+                                existing_middle = st.session_state.user_profile.get(
+                                    "food_preferences_middle", {}
+                                )
+                                default_checked = middle_cat[
+                                    "name"
+                                ] in existing_middle.get(large_cat, [])
+
+                                is_selected = st.checkbox(
+                                    display_name,
+                                    value=default_checked,
+                                    key=f"middle_cat_{large_cat}_{middle_cat['name']}",
+                                )
+
+                                if is_selected:
+                                    selected_middle.append(middle_cat["name"])
+
+                        if selected_middle:
+                            selected_middle_all[large_cat] = selected_middle
+
+        # 프로필에 저장
+        st.session_state.user_profile["food_preferences_large"] = selected_large
+        st.session_state.user_profile["food_preferences_middle"] = selected_middle_all
+
+        # 기존 food_preferences도 유지 (하위 호환성)
+        st.session_state.user_profile["food_preferences"] = selected_large
 
         # 다음 단계 버튼
-        col1, col2 = st.columns([1, 1])
-        with col1:
-            if st.button("◀ 이전", use_container_width=True):
-                st.session_state.onboarding_step = 2
-                st.rerun()
-
-        with col2:
-            if st.button("다음 ▶", use_container_width=True, type="primary"):
-                st.session_state.onboarding_step = 4
-                st.rerun()
+        self._render_navigation_buttons(2, 4)
 
     def _render_restaurant_rating_step(self):
         """음식점 평가 단계"""
@@ -400,23 +571,13 @@ class OnboardingPage:
             )
 
         # 다음 단계 버튼
-        col1, col2 = st.columns([1, 1])
-        with col1:
-            if st.button("◀ 이전", use_container_width=True):
-                st.session_state.onboarding_step = 3
-                st.rerun()
-
-        with col2:
-            if rated_count >= self.min_ratings_required:
-                if st.button("완료 ▶", use_container_width=True, type="primary"):
-                    st.session_state.onboarding_step = 5
-                    st.rerun()
-            else:
-                st.button(
-                    f"{self.min_ratings_required - rated_count}개 더 평가 필요",
-                    disabled=True,
-                    use_container_width=True,
-                )
+        self._render_navigation_buttons(
+            3,
+            5,
+            next_condition=rated_count >= self.min_ratings_required,
+            next_label="완료 ▶",
+            disabled_label=f"{self.min_ratings_required - rated_count}개 더 평가 필요",
+        )
 
     def _render_completion_step(self):
         """완료 단계"""
@@ -455,6 +616,25 @@ class OnboardingPage:
             st.write(
                 f"• 평소 식사비: {st.session_state.user_profile.get('regular_budget', '미설정')}"
             )
+
+            # 선호 음식 카테고리 표시
+            large_prefs = st.session_state.user_profile.get(
+                "food_preferences_large", []
+            )
+            middle_prefs = st.session_state.user_profile.get(
+                "food_preferences_middle", {}
+            )
+
+            if large_prefs:
+                st.write(f"• 선호 음식 종류: {', '.join(large_prefs)}")
+
+                # 세부 카테고리가 있는 경우 표시
+                if middle_prefs:
+                    for large_cat, middle_list in middle_prefs.items():
+                        if middle_list:
+                            st.write(f"  - {large_cat}: {', '.join(middle_list)}")
+            else:
+                st.write("• 선호 음식 종류: 미설정")
 
             st.markdown("**⭐ 평가 정보**")
             rated_count = sum(

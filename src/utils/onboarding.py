@@ -227,6 +227,11 @@ class OnboardingManager:
             if not profile_data.get(field):
                 errors.append(f"{field} 정보가 누락되었습니다.")
 
+        # 선호 음식 카테고리 확인
+        food_prefs_large = profile_data.get("food_preferences_large", [])
+        if not food_prefs_large:
+            errors.append("최소 1개의 선호 음식 종류를 선택해주세요.")
+
         # 평가 개수 확인
         rated_count = len([r for r in ratings_data.values() if r > 0])
         if rated_count < 3:  # 최소 3개 평가 필요
@@ -253,8 +258,10 @@ class OnboardingManager:
             # 실제로는 ratings_data에서 높은 점수를 받은 음식점들의 카테고리를 분석
             # 현재는 샘플 데이터로 대체
 
-            # 선호하는 음식 종류 고려
-            preferred_categories = profile_data.get("food_preferences", [])
+            # 선호하는 음식 종류 고려 (새로운 구조 우선, 기존 구조 fallback)
+            preferred_categories = profile_data.get(
+                "food_preferences_large", profile_data.get("food_preferences", [])
+            )
 
             # 매운맛 정도 고려
             spice_level = profile_data.get("spice_level", 2)

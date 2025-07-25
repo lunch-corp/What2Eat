@@ -11,7 +11,6 @@ from utils.auth import (
     check_authentication,
     get_current_user,
     has_completed_onboarding,
-    is_first_login,
     logout,
 )
 from utils.firebase_logger import get_firebase_logger
@@ -313,9 +312,10 @@ def main():
         return
 
     # 첫 로그인 사용자이고 온보딩을 완료하지 않은 경우 온보딩 페이지 표시
-    if is_first_login() and not has_completed_onboarding():
+    # is_first_login() 첫 로그인에 온보딩을 마치지 않은 경우도 있기때문에 and 값 없앰
+    if not has_completed_onboarding():
         st.info(
-            "🎉 처음 방문하신 것을 환영합니다! 맞춤 추천을 위한 간단한 설정을 진행해주세요."
+            "🎉 머먹에 오신 것을 환영합니다! 맞춤 추천을 위한 간단한 설정을 진행해주세요."
         )
         # 온보딩에서도 app 인스턴스가 필요하므로 먼저 생성
         app = What2EatApp()
