@@ -73,6 +73,101 @@ class OnboardingManager:
 
         return restaurants
 
+    def get_restaurants_by_preferred_categories(
+        self, location: str, preferred_categories: List[str], offset: int = 0, limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        """선호 카테고리 기반 음식점 조회 (페이징 지원)"""
+        if not self.app or not hasattr(self.app, "df_diner"):
+            return []
+
+        # 현재 사용자 위치 정보 가져오기
+        if "user_lat" not in st.session_state or "user_lon" not in st.session_state:
+            return []
+
+        user_lat = st.session_state.user_lat
+        user_lon = st.session_state.user_lon
+
+        # 2km 반경 내 데이터 필터링
+        df_geo_filtered = get_filtered_data(
+            self.app.df_diner, user_lat, user_lon, max_radius=2
+        )
+
+        # diner_grade가 있는 데이터만 필터링
+        df_geo_filtered = df_geo_filtered[df_geo_filtered["diner_grade"].notna()]
+
+        # diner_grade가 1 이상인 찐맛집만 필터링
+        df_quality = df_geo_filtered[df_geo_filtered["diner_grade"] >= 1]
+
+        if len(df_quality) == 0:
+            return []
+
+        # 선호 카테고리 기반 필터링 (우선순위: 선호 카테고리 > 기타)
+        preferred_restaurants = []
+        other_restaurants = []
+
+        for _, row in df_quality.iterrows():
+            restaurant_category = row.get("diner_category_large", "")
+            
+            restaurant = {
+                "id": str(row.get("diner_idx", "")),
+                "name": row.get("diner_name", ""),
+                "category": restaurant_category,
+                "diner_category_large": restaurant_category,
+                "address": row.get("diner_num_address", f"{location} 근처"),
+                "rating": float(row.get("diner_review_avg", 0)),
+                "review_count": int(row.get("diner_review_cnt", 0)),
+                "price_range": "정보 없음",
+                "specialties": row.get("diner_menu_name", [])[:3]
+                if row.get("diner_menu_name")
+                else [],
+                "distance": round(row.get("distance", 0), 1),
+                "diner_grade": float(row.get("diner_grade", 0)),
+                "is_preferred": restaurant_category in preferred_categories,
+            }
+            
+            if restaurant_category in preferred_categories:
+                preferred_restaurants.append(restaurant)
+            else:
+                other_restaurants.append(restaurant)
+
+        # 선호 카테고리는 diner_grade 높은 순, 기타 카테고리도 diner_grade 높은 순 정렬
+        preferred_restaurants.sort(key=lambda x: x["diner_grade"], reverse=True)
+        other_restaurants.sort(key=lambda x: x["diner_grade"], reverse=True)
+
+        # 선호 카테고리를 먼저 배치하고, 그 다음 기타 카테고리 배치
+        all_restaurants = preferred_restaurants + other_restaurants
+
+        # 페이징 처리
+        end_idx = offset + limit
+        return all_restaurants[offset:end_idx]
+
+    def get_total_restaurants_count(
+        self, location: str, preferred_categories: List[str] = None
+    ) -> int:
+        """전체 음식점 개수 조회"""
+        if not self.app or not hasattr(self.app, "df_diner"):
+            return 0
+
+        # 현재 사용자 위치 정보 가져오기
+        if "user_lat" not in st.session_state or "user_lon" not in st.session_state:
+            return 0
+
+        user_lat = st.session_state.user_lat
+        user_lon = st.session_state.user_lon
+
+        # 2km 반경 내 데이터 필터링
+        df_geo_filtered = get_filtered_data(
+            self.app.df_diner, user_lat, user_lon, max_radius=2
+        )
+
+        # diner_grade가 있는 데이터만 필터링
+        df_geo_filtered = df_geo_filtered[df_geo_filtered["diner_grade"].notna()]
+
+        # diner_grade가 1 이상인 찐맛집만 필터링
+        df_quality = df_geo_filtered[df_geo_filtered["diner_grade"] >= 1]
+
+        return len(df_quality)
+
     def get_similar_restaurants(
         self, restaurant_id: str, limit: int = 3
     ) -> List[Dict[str, Any]]:
@@ -176,7 +271,7 @@ class OnboardingManager:
 
             # 로그 기록
             if self.logger.is_available():
-                self.logger.log_activity(
+                self.logger.log_user_activity(
                     uid,
                     "profile_created",
                     {

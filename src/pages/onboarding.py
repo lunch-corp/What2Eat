@@ -143,6 +143,13 @@ class OnboardingPage:
         col1, col2 = st.columns([1, 1])
         with col1:
             if st.button("◀ 이전", use_container_width=True):
+                # 음식점 평가 단계에서 이전으로 돌아갈 때 데이터 초기화
+                if st.session_state.onboarding_step == 4:
+                    if "loaded_restaurants" in st.session_state:
+                        del st.session_state.loaded_restaurants
+                    if "restaurants_offset" in st.session_state:
+                        del st.session_state.restaurants_offset
+                
                 st.session_state.onboarding_step = prev_step
                 st.rerun()
 
@@ -476,21 +483,52 @@ class OnboardingPage:
         """음식점 평가 단계"""
         st.markdown("# ⭐ 음식점을 평가해주세요")
 
-        st.markdown(f"""
-        설정하신 지역 **'{st.session_state.user_profile.get("location", "")}'** 주변의 인기 음식점들입니다.  
-        경험해보신 곳이 있다면 1-5점으로 평가해주세요. (최소 {self.min_ratings_required}개 평가 필요)
-        """)
+        # 선호 카테고리 정보 가져오기
+        preferred_categories = st.session_state.user_profile.get("food_preferences_large", [])
+        
+        if preferred_categories:
+            st.markdown(f"""
+            설정하신 지역 **'{st.session_state.user_profile.get("location", "")}'** 주변의 음식점들입니다.  
+            선호하신 **{', '.join(preferred_categories)}** 카테고리를 우선으로 보여드려요. 📍  
+            경험해보신 곳이 있다면 1-5점으로 평가해주세요. (최소 {self.min_ratings_required}개 평가 필요)
+            """)
+        else:
+            st.markdown(f"""
+            설정하신 지역 **'{st.session_state.user_profile.get("location", "")}'** 주변의 인기 음식점들입니다.  
+            경험해보신 곳이 있다면 1-5점으로 평가해주세요. (최소 {self.min_ratings_required}개 평가 필요)
+            """)
 
-        # 위치 기반 음식점 데이터 가져오기
+        # 페이징 상태 초기화
+        if "restaurants_offset" not in st.session_state:
+            st.session_state.restaurants_offset = 0
+        if "loaded_restaurants" not in st.session_state:
+            st.session_state.loaded_restaurants = []
+
+        # 위치 기반 음식점 데이터 가져오기 (선호 카테고리 우선)
         location = st.session_state.user_profile.get("location", "")
-        sample_restaurants = (
-            self.onboarding_manager.get_popular_restaurants_by_location(location)
-        )
+        
+        # 첫 로드이거나 새로고침 시 초기 데이터 로드
+        if not st.session_state.loaded_restaurants:
+            if preferred_categories:
+                new_restaurants = self.onboarding_manager.get_restaurants_by_preferred_categories(
+                    location, preferred_categories, offset=0, limit=10
+                )
+            else:
+                new_restaurants = self.onboarding_manager.get_popular_restaurants_by_location(
+                    location, limit=10
+                )
+            st.session_state.loaded_restaurants = new_restaurants
+            st.session_state.restaurants_offset = len(new_restaurants)
 
+        sample_restaurants = st.session_state.loaded_restaurants
         rated_count = 0
 
         for i, restaurant in enumerate(sample_restaurants):
-            with st.expander(f"🍽️ {restaurant['name']} - {restaurant['category']}"):
+            # 선호 카테고리인지 표시
+            is_preferred = restaurant.get("is_preferred", False)
+            category_badge = f"💖 {restaurant['category']}" if is_preferred else f"🏷️ {restaurant['category']}"
+            
+            with st.expander(f"🍽️ {restaurant['name']} - {category_badge}"):
                 col1, col2 = st.columns([1, 2])
 
                 with col1:
@@ -505,11 +543,15 @@ class OnboardingPage:
 
                 with col2:
                     st.markdown(f"**{restaurant['name']}**")
+                    if is_preferred:
+                        st.markdown("💖 **선호 카테고리**")
                     st.markdown(f"📍 {restaurant['address']}")
-                    st.markdown(f"🏷️ {restaurant['category']}")
+                    st.markdown(f"{category_badge}")
                     st.markdown(
                         f"⭐ 평점: {restaurant['rating']} ({restaurant['review_count']}개 리뷰)"
                     )
+                    if restaurant.get("distance"):
+                        st.markdown(f"🚶‍♂️ 거리: {restaurant['distance']}km")
 
                     # 평가 슬라이더
                     rating_key = f"rating_{restaurant['id']}"
@@ -559,6 +601,41 @@ class OnboardingPage:
 
                                 if similar_rating > 0:
                                     rated_count += 1
+
+        # 더 많은 음식점 불러오기 버튼
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            total_count = self.onboarding_manager.get_total_restaurants_count(location, preferred_categories)
+            current_count = len(st.session_state.loaded_restaurants)
+            
+            if current_count < total_count:
+                if st.button(
+                    f"🔍 더 많은 음식점 보기 ({current_count}/{total_count})", 
+                    use_container_width=True,
+                    type="secondary"
+                ):
+                    # 추가 음식점 로드
+                    if preferred_categories:
+                        new_restaurants = self.onboarding_manager.get_restaurants_by_preferred_categories(
+                            location, preferred_categories, 
+                            offset=st.session_state.restaurants_offset, 
+                            limit=10
+                        )
+                    else:
+                        new_restaurants = self.onboarding_manager.get_popular_restaurants_by_location(
+                            location, limit=10
+                        )
+                    
+                    if new_restaurants:
+                        st.session_state.loaded_restaurants.extend(new_restaurants)
+                        st.session_state.restaurants_offset += len(new_restaurants)
+                        st.rerun()
+                    else:
+                        st.info("더 이상 불러올 음식점이 없습니다.")
+            else:
+                st.info(f"모든 음식점을 표시했습니다 ({current_count}개)")
+
+        st.markdown("---")
 
         # 진행 상황 표시
         if rated_count >= self.min_ratings_required:
@@ -707,7 +784,7 @@ class OnboardingPage:
             user_info = get_current_user()
             if user_info:
                 uid = user_info.get("localId")
-                self.logger.log_activity(
+                self.logger.log_user_activity(
                     uid,
                     "onboarding_completed",
                     {"profile_data": st.session_state.user_profile},
