@@ -794,7 +794,10 @@ class OnboardingPage:
                 )
 
                 if st.button("지금 바로 시작하기"):
+                    # 온보딩 완료 플래그 설정 (세션 클리어 전에 설정)
+                    onboarding_completed = True
                     st.session_state.clear()  # 온보딩 상태 초기화
+                    st.session_state.onboarding_just_completed = onboarding_completed  # 플래그 복원
                     st.rerun()
             else:
                 st.error("❌ 저장 중 오류가 발생했습니다. 다시 시도해주세요.")

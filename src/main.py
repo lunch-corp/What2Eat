@@ -273,7 +273,27 @@ def render_authenticated_sidebar():
 
         # 페이지 선택
         page_options = ["🤤 오늘 머먹?", "🕺🏽 니가 가본 그집", "📊 내 활동 로그"]
-        selected_page = st.radio("페이지 선택", page_options)
+        
+        # 온보딩 완료 직후라면 chat_page를 기본값으로 설정
+        default_index = 0  # 기본적으로 첫 번째 옵션 (chat_page)
+        
+        # 온보딩 완료 직후 감지: 온보딩이 완료되었지만 아직 페이지 선택 기록이 없는 경우
+        if "selected_page_history" not in st.session_state:
+            st.session_state.selected_page_history = []
+            # 온보딩을 막 완료한 사용자는 chat_page로 안내
+            if has_completed_onboarding():
+                default_index = 0  # chat_page 인덱스
+        
+        # 명시적인 온보딩 완료 플래그가 있는 경우
+        if "onboarding_just_completed" in st.session_state and st.session_state.onboarding_just_completed:
+            default_index = 0  # chat_page 인덱스
+            st.session_state.onboarding_just_completed = False  # 플래그 리셋
+        
+        selected_page = st.radio("페이지 선택", page_options, index=default_index)
+        
+        # 페이지 선택 기록 추가
+        if selected_page not in st.session_state.selected_page_history:
+            st.session_state.selected_page_history.append(selected_page)
 
         return selected_page
 
@@ -332,6 +352,13 @@ def main():
 
     # 사이드바 렌더링 및 페이지 선택
     selected_page = render_authenticated_sidebar()
+
+    # 온보딩 완료 직후 환영 메시지 표시
+    if ("selected_page_history" in st.session_state and 
+        len(st.session_state.selected_page_history) == 1 and 
+        selected_page == "🤤 오늘 머먹?" and 
+        has_completed_onboarding()):
+        st.success("🎉 온보딩이 완료되었습니다! 이제 맞춤 추천을 받아보세요.")
 
     # 선택된 페이지에 따라 해당 함수 호출
     if selected_page == "🤤 오늘 머먹?":

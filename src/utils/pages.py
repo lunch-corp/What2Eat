@@ -12,6 +12,7 @@ from utils.data_processing import (
 )
 from utils.dialogs import change_location, show_restaurant_map
 from utils.firebase_logger import get_firebase_logger
+from utils.onboarding import get_onboarding_manager
 from utils.ui_components import choice_avatar, display_results, my_chat_message
 
 
@@ -420,10 +421,31 @@ class PageManager:
                     diner_category_lst, key=lambda x: PRIORITY_ORDER.get(x, 3)
                 )
 
+                # 온보딩에서 선택한 선호 카테고리를 기본값으로 설정
+                default_categories = []
+                try:
+                    onboarding_manager = get_onboarding_manager(self.app)
+                    user_profile = onboarding_manager.load_user_profile()
+                    if user_profile:
+                        # 새로운 구조 우선, 기존 구조 fallback
+                        preferred_categories = user_profile.get(
+                            "food_preferences_large", 
+                            user_profile.get("food_preferences", [])
+                        )
+                        # 실제 데이터에 존재하는 카테고리만 필터링
+                        default_categories = [
+                            cat for cat in preferred_categories 
+                            if cat in sorted_diner_category_lst
+                        ]
+                except Exception as e:
+                    # 온보딩 정보 로드 실패 시 빈 리스트 사용
+                    default_categories = []
+
                 if sorted_diner_category_lst:
                     diner_category = st.multiselect(
                         label="첫번째 업태",
                         options=sorted_diner_category_lst,
+                        default=default_categories,
                         label_visibility="hidden",
                     )
                     if bool(diner_category):

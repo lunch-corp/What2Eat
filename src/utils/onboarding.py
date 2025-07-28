@@ -527,117 +527,325 @@ class OnboardingManager:
     def get_recommendation_preview(
         self, profile_data: Dict[str, Any], ratings_data: Dict[str, int]
     ) -> List[Dict[str, Any]]:
-        """온보딩 데이터 기반 추천 미리보기 (간단한 버전)"""
+        """온보딩 데이터 기반 추천 미리보기 - 실제 데이터 활용"""
         try:
-            # 사용자가 높게 평가한 음식점들의 카테고리 분석
-            high_rated_categories = []
+            if not self.app or not hasattr(self.app, "df_diner"):
+                return []
 
-            # 실제로는 ratings_data에서 높은 점수를 받은 음식점들의 카테고리를 분석
-            # 현재는 샘플 데이터로 대체
+            # 현재 사용자 위치 정보 확인
+            if "user_lat" not in st.session_state or "user_lon" not in st.session_state:
+                return []
 
-            # 선호하는 음식 종류 고려 (새로운 구조 우선, 기존 구조 fallback)
+            user_lat = st.session_state.user_lat
+            user_lon = st.session_state.user_lon
+
+            # 2km 반경 내 데이터 필터링
+            df_geo_filtered = get_filtered_data(
+                self.app.df_diner, user_lat, user_lon, max_radius=100
+            )
+
+            # diner_grade가 있는 데이터만 필터링
+            df_geo_filtered = df_geo_filtered[df_geo_filtered["diner_grade"].notna()]
+
+            # diner_grade가 1 이상인 찐맛집만 필터링
+            df_quality = df_geo_filtered[df_geo_filtered["diner_grade"] >= 1]
+
+            if len(df_quality) == 0:
+                return []
+
+            # 온보딩 정보 분석
             preferred_categories = profile_data.get(
                 "food_preferences_large", profile_data.get("food_preferences", [])
             )
-
-            # 매운맛 정도 고려
             spice_level = profile_data.get("spice_level", 2)
-
-            # 예산 고려
             budget = profile_data.get("regular_budget", "1-2만원")
+            age_group = self._get_age_group(profile_data.get("birth_year"))
+            gender = profile_data.get("gender", "기타")
 
-            # 간단한 추천 로직 (실제로는 더 복잡한 ML 모델 사용)
-            recommended_restaurants = [
-                {
-                    "name": "추천 음식점 1",
-                    "category": "한식" if "한식" in preferred_categories else "양식",
-                    "reason": "취향 분석 결과 좋아하실 것 같아요!",
-                    "rating": 4.6,
-                },
-                {
-                    "name": "추천 음식점 2",
-                    "category": "일식" if spice_level < 3 else "중식",
-                    "reason": f"매운맛 {spice_level}단 기준으로 추천드려요!",
-                    "rating": 4.4,
-                },
-                {
-                    "name": "추천 음식점 3",
-                    "category": "분식" if "1만원" in budget else "양식",
-                    "reason": f"예산 {budget}에 맞는 맛집이에요!",
-                    "rating": 4.3,
-                },
-            ]
+            # 사용자가 높게 평가한 음식점들의 카테고리 분석
+            high_rated_categories = self._analyze_rated_categories(ratings_data)
 
-            return recommended_restaurants
+            # 추천 로직 적용
+            recommendations = []
+
+            # 1. 선호 카테고리 기반 추천 (가중치 높음)
+            if preferred_categories:
+                pref_recs = self._get_category_based_recommendations(
+                    df_quality, preferred_categories, limit=2
+                )
+                for rec in pref_recs:
+                    rec["reason"] = f"선호하시는 {rec['category']} 카테고리의 인기 맛집이에요! (평점 {rec['diner_grade']:.1f})"
+                    rec["recommendation_type"] = "선호 카테고리"
+                recommendations.extend(pref_recs)
+
+            # 2. 평가 패턴 기반 추천
+            if high_rated_categories:
+                pattern_recs = self._get_pattern_based_recommendations(
+                    df_quality, high_rated_categories, preferred_categories, limit=2
+                )
+                for rec in pattern_recs:
+                    rec["reason"] = f"평가하신 {rec['category']} 맛집들과 비슷한 스타일이에요! (평점 {rec['diner_grade']:.1f})"
+                    rec["recommendation_type"] = "취향 분석"
+                recommendations.extend(pattern_recs)
+
+            # 3. 예산 고려 추천
+            budget_recs = self._get_budget_friendly_recommendations(
+                df_quality, budget, preferred_categories + high_rated_categories, limit=1
+            )
+            for rec in budget_recs:
+                rec["reason"] = f"예산 {budget}에 맞는 가성비 좋은 맛집이에요! (평점 {rec['diner_grade']:.1f})"
+                rec["recommendation_type"] = "예산 맞춤"
+            recommendations.extend(budget_recs)
+
+            # 4. 매운맛 선호도 기반 추천
+            spice_recs = self._get_spice_level_recommendations(
+                df_quality, spice_level, preferred_categories + high_rated_categories, limit=1
+            )
+            for rec in spice_recs:
+                spice_desc = "순한맛" if spice_level <= 2 else "보통맛" if spice_level <= 3 else "매운맛"
+                rec["reason"] = f"매운맛 {spice_level}단 기준으로 {spice_desc} 좋아하실 것 같아요! (평점 {rec['diner_grade']:.1f})"
+                rec["recommendation_type"] = "매운맛 맞춤"
+            recommendations.extend(spice_recs)
+
+            # 5. 연령/성별 기반 인기 맛집 추천
+            demo_recs = self._get_demographic_recommendations(
+                df_quality, age_group, gender, preferred_categories + high_rated_categories, limit=1
+            )
+            for rec in demo_recs:
+                rec["reason"] = f"{age_group} {gender}분들이 많이 찾는 인기 맛집이에요! (평점 {rec['diner_grade']:.1f})"
+                rec["recommendation_type"] = "인기 맛집"
+            recommendations.extend(demo_recs)
+
+            # 중복 제거 및 최종 정리
+            unique_recommendations = self._remove_duplicates(recommendations)
+
+            # 최대 5개로 제한하고 다양성 확보
+            final_recommendations = self._ensure_diversity(unique_recommendations, max_count=5)
+
+            return final_recommendations
 
         except Exception as e:
             st.error(f"추천 미리보기 생성 중 오류: {str(e)}")
             return []
 
-    def get_location_suggestions(self, query: str) -> List[str]:
-        """위치 검색 자동완성 제안"""
-        # 실제로는 지도 API나 위치 DB에서 검색
-        seoul_districts = [
-            "강남구",
-            "강동구",
-            "강북구",
-            "강서구",
-            "관악구",
-            "광진구",
-            "구로구",
-            "금천구",
-            "노원구",
-            "도봉구",
-            "동대문구",
-            "동작구",
-            "마포구",
-            "서대문구",
-            "서초구",
-            "성동구",
-            "성북구",
-            "송파구",
-            "양천구",
-            "영등포구",
-            "용산구",
-            "은평구",
-            "종로구",
-            "중구",
-            "중랑구",
-        ]
+    def _get_age_group(self, birth_year: int) -> str:
+        """출생연도를 기반으로 연령대 반환"""
+        if not birth_year:
+            return "전체"
+        
+        current_year = datetime.now().year
+        age = current_year - birth_year
+        
+        if age < 20:
+            return "10대"
+        elif age < 30:
+            return "20대"
+        elif age < 40:
+            return "30대"
+        elif age < 50:
+            return "40대"
+        elif age < 60:
+            return "50대"
+        else:
+            return "60대 이상"
 
-        popular_areas = [
-            "신사동",
-            "홍대",
-            "명동",
-            "이태원",
-            "강남역",
-            "신촌",
-            "여의도",
-            "잠실",
-            "건대",
-            "압구정",
-            "청담동",
-            "삼성동",
-            "논현동",
-            "역삼동",
-            "서면",
-            "센텀시티",
-        ]
+    def _analyze_rated_categories(self, ratings_data: Dict[str, int]) -> List[str]:
+        """사용자가 높게 평가한 음식점들의 카테고리 분석"""
+        if not self.app or not hasattr(self.app, "df_diner"):
+            return []
 
-        suggestions = []
-        query_lower = query.lower()
+        high_rated_categories = []
+        
+        # 4점 이상 평가한 음식점들의 카테고리 추출
+        for restaurant_id, rating in ratings_data.items():
+            if rating >= 4:
+                try:
+                    restaurant_info = self.app.df_diner[
+                        self.app.df_diner["diner_idx"].astype(str) == restaurant_id
+                    ]
+                    if len(restaurant_info) > 0:
+                        category = restaurant_info.iloc[0].get("diner_category_large")
+                        if category and category not in high_rated_categories:
+                            high_rated_categories.append(category)
+                except Exception:
+                    continue
 
-        # 구 단위 검색
-        for district in seoul_districts:
-            if query_lower in district.lower():
-                suggestions.append(f"서울시 {district}")
+        return high_rated_categories
 
-        # 동/지역명 검색
-        for area in popular_areas:
-            if query_lower in area.lower():
-                suggestions.append(area)
+    def _get_category_based_recommendations(
+        self, df_quality: pd.DataFrame, preferred_categories: List[str], limit: int = 2
+    ) -> List[Dict[str, Any]]:
+        """선호 카테고리 기반 추천"""
+        category_recs = []
+        
+        for category in preferred_categories[:2]:  # 상위 2개 카테고리만
+            category_df = df_quality[df_quality["diner_category_large"] == category]
+            if len(category_df) > 0:
+                # diner_grade 높은 순으로 정렬하여 상위 1개 선택
+                top_restaurant = category_df.nlargest(1, "diner_grade")
+                category_recs.extend(self._convert_to_recommendation_format(top_restaurant))
+                
+        return category_recs[:limit]
 
-        return suggestions[:5]  # 최대 5개 제안
+    def _get_pattern_based_recommendations(
+        self, df_quality: pd.DataFrame, high_rated_categories: List[str], 
+        preferred_categories: List[str], limit: int = 2
+    ) -> List[Dict[str, Any]]:
+        """평가 패턴 기반 추천"""
+        pattern_recs = []
+        
+        # 이미 선호 카테고리에서 추천된 것과 다른 카테고리 선택
+        available_categories = [cat for cat in high_rated_categories if cat not in preferred_categories]
+        
+        for category in available_categories[:2]:
+            category_df = df_quality[df_quality["diner_category_large"] == category]
+            if len(category_df) > 0:
+                top_restaurant = category_df.nlargest(1, "diner_grade")
+                pattern_recs.extend(self._convert_to_recommendation_format(top_restaurant))
+                
+        return pattern_recs[:limit]
+
+    def _get_budget_friendly_recommendations(
+        self, df_quality: pd.DataFrame, budget: str, exclude_categories: List[str], limit: int = 1
+    ) -> List[Dict[str, Any]]:
+        """예산 친화적 추천 (분식, 한식 등 가성비 좋은 카테고리 우선)"""
+        budget_friendly_categories = ["분식", "한식", "치킨", "중식", "패스트푸드"]
+        
+        # 예산에 따른 카테고리 우선순위 조정
+        if "1만원" in budget or "만원 이하" in budget:
+            priority_categories = ["분식", "패스트푸드", "치킨"]
+        elif "1-2만원" in budget:
+            priority_categories = ["한식", "분식", "중식"]
+        else:
+            priority_categories = ["한식", "양식", "일식"]
+            
+        for category in priority_categories:
+            if category not in exclude_categories:
+                category_df = df_quality[df_quality["diner_category_large"] == category]
+                if len(category_df) > 0:
+                    top_restaurant = category_df.nlargest(1, "diner_grade")
+                    return self._convert_to_recommendation_format(top_restaurant)[:limit]
+                    
+        return []
+
+    def _get_spice_level_recommendations(
+        self, df_quality: pd.DataFrame, spice_level: int, exclude_categories: List[str], limit: int = 1
+    ) -> List[Dict[str, Any]]:
+        """매운맛 선호도 기반 추천"""
+        if spice_level <= 2:  # 순한맛 선호
+            mild_categories = ["일식", "양식", "디저트", "베이커리"]
+        elif spice_level <= 3:  # 보통맛
+            mild_categories = ["한식", "중식", "분식"]
+        else:  # 매운맛 선호
+            mild_categories = ["중식", "한식", "동남아시아음식", "인도음식"]
+            
+        for category in mild_categories:
+            if category not in exclude_categories:
+                category_df = df_quality[df_quality["diner_category_large"] == category]
+                if len(category_df) > 0:
+                    top_restaurant = category_df.nlargest(1, "diner_grade")
+                    return self._convert_to_recommendation_format(top_restaurant)[:limit]
+                    
+        return []
+
+    def _get_demographic_recommendations(
+        self, df_quality: pd.DataFrame, age_group: str, gender: str, 
+        exclude_categories: List[str], limit: int = 1
+    ) -> List[Dict[str, Any]]:
+        """연령/성별 기반 인기 맛집 추천"""
+        # 전체적으로 인기 높은 카테고리에서 추천
+        popular_categories = ["한식", "양식", "일식", "중식", "카페"]
+        
+        for category in popular_categories:
+            if category not in exclude_categories:
+                category_df = df_quality[df_quality["diner_category_large"] == category]
+                if len(category_df) > 0:
+                    # 리뷰 수와 평점을 모두 고려한 종합 점수로 정렬
+                    category_df = category_df.copy()
+                    category_df["composite_score"] = (
+                        category_df["diner_grade"] * 0.7 + 
+                        (category_df["diner_review_cnt"].fillna(0) / category_df["diner_review_cnt"].fillna(0).max()) * 0.3
+                    )
+                    top_restaurant = category_df.nlargest(1, "composite_score")
+                    return self._convert_to_recommendation_format(top_restaurant)[:limit]
+                    
+        return []
+
+    def _convert_to_recommendation_format(self, df_restaurants: pd.DataFrame) -> List[Dict[str, Any]]:
+        """DataFrame을 추천 형식으로 변환"""
+        recommendations = []
+        
+        for _, row in df_restaurants.iterrows():
+            # NaN 값 안전하게 처리
+            review_count = row.get("diner_review_cnt", 0)
+            if pd.isna(review_count):
+                review_count = 0
+            else:
+                review_count = int(review_count)
+
+            diner_grade = row.get("diner_grade", 0)
+            if pd.isna(diner_grade):
+                diner_grade = 0.0
+            else:
+                diner_grade = float(diner_grade)
+
+            distance = row.get("distance", 0)
+            if pd.isna(distance):
+                distance = 0.0
+            else:
+                distance = round(float(distance), 1)
+
+            recommendation = {
+                "id": str(row.get("diner_idx", "")),
+                "name": row.get("diner_name", ""),
+                "category": row.get("diner_category_large", ""),
+                "address": row.get("diner_num_address", ""),
+                "diner_grade": diner_grade,
+                "rating": diner_grade,  # 호환성을 위해 중복
+                "review_count": review_count,
+                "distance": distance,
+                "specialties": row.get("diner_menu_name", [])[:3] if row.get("diner_menu_name") else [],
+                "price_range": "정보 없음",
+            }
+            recommendations.append(recommendation)
+            
+        return recommendations
+
+    def _remove_duplicates(self, recommendations: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """중복 음식점 제거"""
+        seen_ids = set()
+        unique_recs = []
+        
+        for rec in recommendations:
+            if rec["id"] not in seen_ids:
+                seen_ids.add(rec["id"])
+                unique_recs.append(rec)
+                
+        return unique_recs
+
+    def _ensure_diversity(self, recommendations: List[Dict[str, Any]], max_count: int = 5) -> List[Dict[str, Any]]:
+        """추천 목록의 다양성 확보"""
+        if len(recommendations) <= max_count:
+            return recommendations
+            
+        # 카테고리별로 분류
+        category_groups = {}
+        for rec in recommendations:
+            category = rec["category"]
+            if category not in category_groups:
+                category_groups[category] = []
+            category_groups[category].append(rec)
+            
+        # 각 카테고리에서 최대 2개씩 선택하여 다양성 확보
+        diverse_recs = []
+        for category, recs in category_groups.items():
+            # diner_grade 높은 순으로 정렬하여 상위 2개 선택
+            sorted_recs = sorted(recs, key=lambda x: x["diner_grade"], reverse=True)
+            diverse_recs.extend(sorted_recs[:2])
+            
+        # 전체 평점 순으로 정렬하여 최종 max_count개 선택
+        final_recs = sorted(diverse_recs, key=lambda x: x["diner_grade"], reverse=True)
+        return final_recs[:max_count]
 
     def analyze_user_taste_profile(
         self, ratings_data: Dict[str, int]
