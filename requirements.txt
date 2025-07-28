@@ -2,3 +2,6 @@ streamlit
 geopy
 firebase-admin
 watchdog
+matplotlib
+streamlit_geolocation
+streamlit_chat

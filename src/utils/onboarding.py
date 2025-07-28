@@ -3,7 +3,9 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+import pandas as pd
 import streamlit as st
+from firebase_admin import firestore
 
 from utils.auth import get_current_user
 from utils.data_processing import get_filtered_data
@@ -55,26 +57,49 @@ class OnboardingManager:
         # 결과를 딕셔너리 리스트로 변환
         restaurants = []
         for _, row in df_selected.iterrows():
+            # NaN 값 안전하게 처리
+            review_count = row.get("diner_review_cnt", 0)
+            if pd.isna(review_count):
+                review_count = 0
+            else:
+                review_count = int(review_count)
+
+            rating = row.get("diner_review_avg", 0)
+            if pd.isna(rating):
+                rating = 0.0
+            else:
+                rating = float(rating)
+
+            distance = row.get("distance", 0)
+            if pd.isna(distance):
+                distance = 0.0
+            else:
+                distance = round(float(distance), 1)
+
             restaurant = {
                 "id": str(row.get("diner_idx", "")),
                 "name": row.get("diner_name", ""),
                 "category": row.get("diner_category_large", "카테고리 정보 없음"),
                 "diner_category_large": row.get("diner_category_large", ""),
                 "address": row.get("diner_num_address", f"{location} 근처"),
-                "rating": float(row.get("diner_review_avg", 0)),
-                "review_count": int(row.get("diner_review_cnt", 0)),
+                "rating": rating,
+                "review_count": review_count,
                 "price_range": "정보 없음",
                 "specialties": row.get("diner_menu_name", [])[:3]
                 if row.get("diner_menu_name")
                 else [],
-                "distance": round(row.get("distance", 0), 1),
+                "distance": distance,
             }
             restaurants.append(restaurant)
 
         return restaurants
 
     def get_restaurants_by_preferred_categories(
-        self, location: str, preferred_categories: List[str], offset: int = 0, limit: int = 10
+        self,
+        location: str,
+        preferred_categories: List[str],
+        offset: int = 0,
+        limit: int = 10,
     ) -> List[Dict[str, Any]]:
         """선호 카테고리 기반 음식점 조회 (페이징 지원)"""
         if not self.app or not hasattr(self.app, "df_diner"):
@@ -104,27 +129,53 @@ class OnboardingManager:
         # 선호 카테고리 기반 필터링 (우선순위: 선호 카테고리 > 기타)
         preferred_restaurants = []
         other_restaurants = []
+        df_quality = df_quality[df_quality["diner_category_large"].notna()]
 
         for _, row in df_quality.iterrows():
             restaurant_category = row.get("diner_category_large", "")
-            
+
+            # NaN 값 안전하게 처리
+            review_count = row.get("diner_review_cnt", 0)
+            if pd.isna(review_count):
+                review_count = 0
+            else:
+                review_count = int(review_count)
+
+            rating = row.get("diner_review_avg", 0)
+            if pd.isna(rating):
+                rating = 0.0
+            else:
+                rating = float(rating)
+
+            distance = row.get("distance", 0)
+            if pd.isna(distance):
+                distance = 0.0
+            else:
+                distance = round(float(distance), 1)
+
+            diner_grade = row.get("diner_grade", 0)
+            if pd.isna(diner_grade):
+                diner_grade = 0.0
+            else:
+                diner_grade = float(diner_grade)
+
             restaurant = {
                 "id": str(row.get("diner_idx", "")),
                 "name": row.get("diner_name", ""),
                 "category": restaurant_category,
                 "diner_category_large": restaurant_category,
                 "address": row.get("diner_num_address", f"{location} 근처"),
-                "rating": float(row.get("diner_review_avg", 0)),
-                "review_count": int(row.get("diner_review_cnt", 0)),
+                "rating": rating,
+                "review_count": review_count,
                 "price_range": "정보 없음",
                 "specialties": row.get("diner_menu_name", [])[:3]
                 if row.get("diner_menu_name")
                 else [],
-                "distance": round(row.get("distance", 0), 1),
-                "diner_grade": float(row.get("diner_grade", 0)),
+                "distance": distance,
+                "diner_grade": diner_grade,
                 "is_preferred": restaurant_category in preferred_categories,
             }
-            
+
             if restaurant_category in preferred_categories:
                 preferred_restaurants.append(restaurant)
             else:
@@ -225,20 +276,40 @@ class OnboardingManager:
 
         # limit 개수만큼 선택
         df_selected = df_sorted.head(limit)
+        df_selected["diner_review_cnt"].fillna(0, inplace=True)
 
         # 결과를 딕셔너리 리스트로 변환
         similar_restaurants = []
         for _, row in df_selected.iterrows():
+            # NaN 값 안전하게 처리
+            review_count = row.get("diner_review_cnt", 0)
+            if pd.isna(review_count):
+                review_count = 0
+            else:
+                review_count = int(review_count)
+
+            diner_grade = row.get("diner_grade", 0)
+            if pd.isna(diner_grade):
+                diner_grade = 0.0
+            else:
+                diner_grade = float(diner_grade)
+
+            distance = row.get("distance", 0)
+            if pd.isna(distance):
+                distance = 0.0
+            else:
+                distance = round(float(distance), 1)
+
             restaurant = {
                 "id": str(row.get("diner_idx", "")),
                 "name": row.get("diner_name", ""),
                 "category": row.get("diner_category_large", ""),
-                "rating": float(row.get("diner_grade", 0)),
+                "rating": diner_grade,
                 "specialties": row.get("diner_menu_name", [])[:2]
                 if row.get("diner_menu_name")
                 else [],
-                "distance": round(row.get("distance", 0), 1),
-                "review_count": int(row.get("diner_review_cnt", 0)),
+                "distance": distance,
+                "review_count": review_count,
             }
             similar_restaurants.append(restaurant)
 
@@ -247,7 +318,7 @@ class OnboardingManager:
     def save_user_profile(
         self, profile_data: Dict[str, Any], ratings_data: Dict[str, int]
     ) -> bool:
-        """사용자 프로필 데이터를 저장"""
+        """사용자 프로필 데이터를 users/{uid}/onboarding_logs 하위 컬렉션에 저장"""
         try:
             user_info = get_current_user()
             if not user_info:
@@ -257,17 +328,25 @@ class OnboardingManager:
             if not uid:
                 return False
 
-            # 저장할 데이터 구성
+            # 저장할 데이터 구성 (profile_data를 직접 사용하여 중복 제거)
             save_data = {
                 "user_id": uid,
-                "profile": profile_data,
+                **profile_data,  # profile_data의 모든 필드를 직접 저장
                 "ratings": ratings_data,
                 "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat(),
                 "onboarding_version": "1.0",
             }
 
-            # 실제로는 Firestore에 저장
-            # db.collection('user_profiles').document(uid).set(save_data)
+            # Firestore의 users/{uid}/onboarding_logs 하위 컬렉션에 저장
+            try:
+                db = firestore.client()
+                # activity_logs와 같은 레벨의 하위 컬렉션으로 저장
+                db.collection("users").document(uid).collection("onboarding_logs").document("profile").set(save_data)
+                st.success("✅ 프로필이 성공적으로 저장되었습니다!")
+            except Exception as firestore_error:
+                st.warning(f"⚠️ Firestore 저장 실패: {str(firestore_error)}")
+                # Firestore 저장 실패해도 계속 진행
 
             # 로그 기록
             if self.logger.is_available():
@@ -289,7 +368,7 @@ class OnboardingManager:
             return False
 
     def load_user_profile(self) -> Optional[Dict[str, Any]]:
-        """사용자 프로필 데이터를 로드"""
+        """users/{uid}/onboarding_logs 하위 컬렉션에서 사용자 프로필 데이터를 로드"""
         try:
             user_info = get_current_user()
             if not user_info:
@@ -299,16 +378,119 @@ class OnboardingManager:
             if not uid:
                 return None
 
-            # 실제로는 Firestore에서 로드
-            # doc = db.collection('user_profiles').document(uid).get()
-            # if doc.exists:
-            #     return doc.to_dict()
-
-            return None
+            # Firestore의 users/{uid}/onboarding_logs 하위 컬렉션에서 로드
+            try:
+                db = firestore.client()
+                doc = db.collection("users").document(uid).collection("onboarding_logs").document("profile").get()
+                if doc.exists:
+                    return doc.to_dict()
+                else:
+                    return None
+            except Exception as firestore_error:
+                st.warning(f"⚠️ Firestore 로드 실패: {str(firestore_error)}")
+                return None
 
         except Exception as e:
             st.error(f"프로필 로드 중 오류: {str(e)}")
             return None
+
+    def update_user_profile(
+        self, profile_updates: Dict[str, Any] = None, ratings_updates: Dict[str, int] = None
+    ) -> bool:
+        """사용자 프로필 데이터를 부분적으로 업데이트"""
+        try:
+            user_info = get_current_user()
+            if not user_info:
+                return False
+
+            uid = user_info.get("localId")
+            if not uid:
+                return False
+
+            # Firestore의 users/{uid}/onboarding_logs 하위 컬렉션에서 업데이트
+            try:
+                db = firestore.client()
+                doc_ref = db.collection("users").document(uid).collection("onboarding_logs").document("profile")
+                
+                # 업데이트할 데이터 구성
+                update_data = {
+                    "updated_at": datetime.now().isoformat(),
+                }
+                
+                # 프로필 데이터 업데이트
+                if profile_updates:
+                    update_data.update(profile_updates)
+                
+                # 평점 데이터 업데이트
+                if ratings_updates:
+                    # 기존 평점 데이터와 병합
+                    existing_doc = doc_ref.get()
+                    if existing_doc.exists:
+                        existing_ratings = existing_doc.to_dict().get("ratings", {})
+                        existing_ratings.update(ratings_updates)
+                        update_data["ratings"] = existing_ratings
+                    else:
+                        update_data["ratings"] = ratings_updates
+                
+                # 문서 업데이트 (merge=True로 기존 데이터 유지)
+                doc_ref.set(update_data, merge=True)
+                st.success("✅ 프로필이 성공적으로 업데이트되었습니다!")
+                
+            except Exception as firestore_error:
+                st.warning(f"⚠️ Firestore 업데이트 실패: {str(firestore_error)}")
+                return False
+
+            # 로그 기록
+            if self.logger.is_available():
+                self.logger.log_user_activity(
+                    uid,
+                    "profile_updated",
+                    {
+                        "updated_fields": list(profile_updates.keys()) if profile_updates else [],
+                        "updated_ratings_count": len(ratings_updates) if ratings_updates else 0,
+                    },
+                )
+
+            return True
+
+        except Exception as e:
+            st.error(f"프로필 업데이트 중 오류: {str(e)}")
+            return False
+
+    def delete_user_profile(self) -> bool:
+        """사용자 프로필 데이터를 삭제"""
+        try:
+            user_info = get_current_user()
+            if not user_info:
+                return False
+
+            uid = user_info.get("localId")
+            if not uid:
+                return False
+
+            # Firestore의 users/{uid}/onboarding_logs 하위 컬렉션에서 삭제
+            try:
+                db = firestore.client()
+                db.collection("users").document(uid).collection("onboarding_logs").document("profile").delete()
+                st.success("✅ 프로필이 성공적으로 삭제되었습니다!")
+                
+            except Exception as firestore_error:
+                st.warning(f"⚠️ Firestore 삭제 실패: {str(firestore_error)}")
+                return False
+
+            # 로그 기록
+            if self.logger.is_available():
+                self.logger.log_user_activity(
+                    uid,
+                    "profile_deleted",
+                    {},
+                )
+
+            return True
+
+        except Exception as e:
+            st.error(f"프로필 삭제 중 오류: {str(e)}")
+            return False
 
     def validate_onboarding_data(
         self, profile_data: Dict[str, Any], ratings_data: Dict[str, int]

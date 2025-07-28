@@ -149,7 +149,7 @@ class OnboardingPage:
                         del st.session_state.loaded_restaurants
                     if "restaurants_offset" in st.session_state:
                         del st.session_state.restaurants_offset
-                
+
                 st.session_state.onboarding_step = prev_step
                 st.rerun()
 
@@ -484,8 +484,10 @@ class OnboardingPage:
         st.markdown("# ⭐ 음식점을 평가해주세요")
 
         # 선호 카테고리 정보 가져오기
-        preferred_categories = st.session_state.user_profile.get("food_preferences_large", [])
-        
+        preferred_categories = st.session_state.user_profile.get(
+            "food_preferences_large", []
+        )
+
         if preferred_categories:
             st.markdown(f"""
             설정하신 지역 **'{st.session_state.user_profile.get("location", "")}'** 주변의 음식점들입니다.  
@@ -506,16 +508,20 @@ class OnboardingPage:
 
         # 위치 기반 음식점 데이터 가져오기 (선호 카테고리 우선)
         location = st.session_state.user_profile.get("location", "")
-        
+
         # 첫 로드이거나 새로고침 시 초기 데이터 로드
         if not st.session_state.loaded_restaurants:
             if preferred_categories:
-                new_restaurants = self.onboarding_manager.get_restaurants_by_preferred_categories(
-                    location, preferred_categories, offset=0, limit=10
+                new_restaurants = (
+                    self.onboarding_manager.get_restaurants_by_preferred_categories(
+                        location, preferred_categories, offset=0, limit=10
+                    )
                 )
             else:
-                new_restaurants = self.onboarding_manager.get_popular_restaurants_by_location(
-                    location, limit=10
+                new_restaurants = (
+                    self.onboarding_manager.get_popular_restaurants_by_location(
+                        location, limit=10
+                    )
                 )
             st.session_state.loaded_restaurants = new_restaurants
             st.session_state.restaurants_offset = len(new_restaurants)
@@ -526,8 +532,12 @@ class OnboardingPage:
         for i, restaurant in enumerate(sample_restaurants):
             # 선호 카테고리인지 표시
             is_preferred = restaurant.get("is_preferred", False)
-            category_badge = f"💖 {restaurant['category']}" if is_preferred else f"🏷️ {restaurant['category']}"
-            
+            category_badge = (
+                f"💖 {restaurant['category']}"
+                if is_preferred
+                else f"🏷️ {restaurant['category']}"
+            )
+
             with st.expander(f"🍽️ {restaurant['name']} - {category_badge}"):
                 col1, col2 = st.columns([1, 2])
 
@@ -542,7 +552,7 @@ class OnboardingPage:
                     )
 
                 with col2:
-                    st.markdown(f"**{restaurant['name']}**")
+                    st.markdown(f"[{restaurant['name']}](https://place.map.kakao.com/{restaurant['id']})")
                     if is_preferred:
                         st.markdown("💖 **선호 카테고리**")
                     st.markdown(f"📍 {restaurant['address']}")
@@ -555,15 +565,17 @@ class OnboardingPage:
 
                     # 평가 슬라이더
                     rating_key = f"rating_{restaurant['id']}"
+                    # 인덱스를 포함하여 키를 더 고유하게 만듦
+                    unique_rating_key = f"slider_{rating_key}_{i}"
 
                     rating = st.select_slider(
                         f"{restaurant['name']} 평가",
                         options=[0, 1, 2, 3, 4, 5],
                         format_func=lambda x: "평가 안함"
                         if x == 0
-                        else f"{x}점 ⭐" * x,
+                        else f"{x}점",
                         value=st.session_state.restaurant_ratings.get(rating_key, 0),
-                        key=f"slider_{rating_key}",
+                        key=unique_rating_key,
                     )
 
                     st.session_state.restaurant_ratings[rating_key] = rating
@@ -582,18 +594,22 @@ class OnboardingPage:
                                 )
                             )
 
-                            for similar in similar_restaurants:
+                            for idx, similar in enumerate(similar_restaurants):
                                 similar_key = f"rating_similar_{similar['id']}"
+                                # 부모 음식점 ID를 포함하여 키를 더 고유하게 만듦
+                                unique_slider_key = (
+                                    f"slider_{similar_key}_{restaurant['id']}_{idx}"
+                                )
                                 similar_rating = st.select_slider(
                                     f"🔗 {similar['name']} (유사 음식점)",
                                     options=[0, 1, 2, 3, 4, 5],
                                     format_func=lambda x: "평가 안함"
                                     if x == 0
-                                    else f"{x}점 ⭐" * x,
+                                    else f"{x}점",
                                     value=st.session_state.restaurant_ratings.get(
                                         similar_key, 0
                                     ),
-                                    key=f"slider_{similar_key}",
+                                    key=unique_slider_key,
                                 )
                                 st.session_state.restaurant_ratings[similar_key] = (
                                     similar_rating
@@ -605,27 +621,32 @@ class OnboardingPage:
         # 더 많은 음식점 불러오기 버튼
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            total_count = self.onboarding_manager.get_total_restaurants_count(location, preferred_categories)
+            total_count = self.onboarding_manager.get_total_restaurants_count(
+                location, preferred_categories
+            )
             current_count = len(st.session_state.loaded_restaurants)
-            
+
             if current_count < total_count:
                 if st.button(
-                    f"🔍 더 많은 음식점 보기 ({current_count}/{total_count})", 
+                    f"🔍 더 많은 음식점 보기 ({current_count}/{total_count})",
                     use_container_width=True,
-                    type="secondary"
+                    type="secondary",
                 ):
                     # 추가 음식점 로드
                     if preferred_categories:
                         new_restaurants = self.onboarding_manager.get_restaurants_by_preferred_categories(
-                            location, preferred_categories, 
-                            offset=st.session_state.restaurants_offset, 
-                            limit=10
+                            location,
+                            preferred_categories,
+                            offset=st.session_state.restaurants_offset,
+                            limit=10,
                         )
                     else:
-                        new_restaurants = self.onboarding_manager.get_popular_restaurants_by_location(
-                            location, limit=10
+                        new_restaurants = (
+                            self.onboarding_manager.get_popular_restaurants_by_location(
+                                location, limit=10
+                            )
                         )
-                    
+
                     if new_restaurants:
                         st.session_state.loaded_restaurants.extend(new_restaurants)
                         st.session_state.restaurants_offset += len(new_restaurants)

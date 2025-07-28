@@ -293,6 +293,15 @@ class FirebaseLogger:
             "restaurant_favorite",
         ]:
             collection_name = "restaurant_logs"
+        elif activity_type in [
+            "profile_created",
+            "profile_updated",
+            "profile_deleted",
+            "onboarding_started",
+            "onboarding_completed",
+            "taste_rating_submitted",
+        ]:
+            collection_name = "onboarding_logs"
         else:
             # 분류되지 않은 활동은 기존 activity_logs에 저장
             collection_name = "activity_logs"
@@ -442,6 +451,7 @@ class FirebaseLogger:
                 "interaction_logs",
                 "restaurant_logs",
                 "activity_logs",
+                "onboarding_logs",
             ]
 
             total_activities = 0

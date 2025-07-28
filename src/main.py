@@ -112,6 +112,7 @@ def user_activity_logs_fragment():
                         "interaction_logs": "⚡",
                         "restaurant_logs": "🍽️",
                         "activity_logs": "📋",
+                        "onboarding_logs": "👤",
                     }.get(collection_name, "📝")
 
                     with st.expander(
@@ -133,6 +134,7 @@ def user_activity_logs_fragment():
                 "🔍 검색 로그": "search_logs",
                 "⚡ 상호작용 로그": "interaction_logs",
                 "🍽️ 음식점 로그": "restaurant_logs",
+                "👤 온보딩 로그": "onboarding_logs",
                 "📋 기타 활동 로그": "activity_logs",
             }
 
