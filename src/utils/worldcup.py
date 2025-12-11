@@ -24,9 +24,10 @@ def analyze_user_preference(selected_diners: List[Dict[str, Any]]) -> str:
             "name": d.get("diner_name"),
             "category_large": d.get("diner_category_large"),
             "category_middle": d.get("diner_category_middle"),
-            "rating": d.get("rating"),
-            "review_count": d.get("review_cnt"),
-            "address": d.get("address"),
+            "diner_menu_price": d.get("diner_menu_price"),
+            "rating": d.get("diner_review_avg"),
+            "review_count": d.get("diner_review_cnt"),
+            "address": d.get("diner_num_address"),
         })
 
     prompt = f"""
