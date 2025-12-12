@@ -21,16 +21,15 @@ def analyze_user_preference(selected_diners: list[dict[str, Any]]) -> str:
     # LLM에게 넘길 식당 정보 요약 만들기
     formatted = []
     for d in selected_diners:
-        formatted.append(
-            {
-                "name": d.get("diner_name"),
-                "category_large": d.get("diner_category_large"),
-                "category_middle": d.get("diner_category_middle"),
-                "rating": d.get("rating"),
-                "review_count": d.get("review_cnt"),
-                "address": d.get("address"),
-            }
-        )
+        formatted.append({
+            "name": d.get("diner_name"),
+            "category_large": d.get("diner_category_large"),
+            "category_middle": d.get("diner_category_middle"),
+            "diner_menu_price": d.get("diner_menu_price"),
+            "rating": d.get("diner_review_avg"),
+            "review_count": d.get("diner_review_cnt"),
+            "address": d.get("diner_num_address"),
+        })
 
     prompt = f"""
     아래는 사용자가 맛집 월드컵에서 선택한 식당 정보 목록입니다.
@@ -84,18 +83,35 @@ class WorldCupManager:
             response = requests.get(
                 f"{self.api_url}/kakao/diners/filtered", params={"n": n}, timeout=20
             )
-            if response.status_code == 200:
-                diners = response.json()
-                # API response가 리스트 형태인지 확인
-                if isinstance(diners, list):
-                    return diners
-                # 단일 객체로 반환될 경우를 대비
-                elif isinstance(diners, dict):
-                    return [diners]
+            if response.status_code != 200:
+                print("랜덤 API 응답 오류:", response.status_code, response.text)
+                return []
+
+            raw_items = response.json()
+
+            # 리스트인지 보장
+            if isinstance(raw_items, dict):
+                raw_items = [raw_items]
+            elif not isinstance(raw_items, list):
+                print("랜덤 API 형식 오류:", raw_items)
+                return []
+
+            # diner_idx 기반 상세조회
+            diners = []
+            for item in raw_items:
+                diner_idx = item.get("diner_idx")
+                if not diner_idx:
+                    continue
+
+                detail = self.get_diner_by_idx(diner_idx)
+                if detail:
+                    diners.append(detail)
+
+            return diners
+
         except Exception as e:
             print(f"랜덤 식당 조회 실패: {e}")
-
-        return []
+            return []
 
     def get_diner_by_idx(self, diner_idx: int) -> Optional[dict[str, Any]]:
         """diner_idx로 특정 식당 정보 가져오기"""
@@ -232,7 +248,7 @@ class WorldCupManager:
                         box-shadow: 0px 2px 6px rgba(0,0,0,0.05);
                         margin-bottom: 20px;'>
                 <div style='font-size:60px;'>{category_icon}</div>
-                <h4 style='margin-top: 10px; margin-bottom: 5px;'>{restaurant["diner_name"]}</h4>
+                <h4 style='margin-top: 10px; margin-bottom: 5px;'>{restaurant.get('diner_name')}</h4>
                 <p style='color: gray; margin-top: 0;'>{category_text}</p>
                 <a href='{diner_url}' target='_blank' style='
                     display:inline-block;
