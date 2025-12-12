@@ -354,8 +354,6 @@ class SessionManager:
                     # JWT 토큰이 유효하면 payload에서 사용자 정보 가져오기
                     payload_data = data.get("payload", {})
 
-                    print(f"[JWT 검증] ✅ 토큰 유효! payload: {payload_data}")
-
                     # payload에서 사용자 정보 추출
                     firebase_uid = payload_data.get("firebase_uid")
                     user_id = payload_data.get("user_id")
@@ -633,19 +631,12 @@ class SessionManager:
                 print("[인증 확인] ⚠️ 세션 상태 미초기화 - 초기화 수행")
                 self._initialize_session_state()
 
-            print("[인증 확인] 🔍 시작")
             is_authenticated = st.session_state.get("is_authenticated", False)
             user_info = st.session_state.get("user_info")
-            jwt_token = st.session_state.get("jwt_access_token")
-
-            print(f"  - 인증 상태: {is_authenticated}")
-            print(f"  - 사용자 정보: {bool(user_info)}")
-            print(f"  - JWT 토큰: {bool(jwt_token)}")
 
             # 이미 인증된 상태라면 JWT 토큰 유효성 확인
             if is_authenticated and user_info:
                 if self.is_token_valid():
-                    print("[인증 확인] ✅ 토큰 유효 - 인증 유지")
                     return True
                 else:
                     # 토큰이 만료되었으면 JWT refresh로 갱신 시도

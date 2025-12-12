@@ -2,6 +2,7 @@
 
 import asyncio
 
+import requests
 import streamlit as st
 
 from utils.api import APIRequester
@@ -117,6 +118,7 @@ class OnboardingPage:
                     diner_idx = result.get("diner_idx", "")
                     match_type = result.get("match_type", "")
                     distance = result.get("distance")
+                    diner_num_address = result.get("diner_num_address")
 
                     with st.expander(f"🍽️ {i}. {diner_name} ({match_type})"):
                         st.markdown(
@@ -127,6 +129,10 @@ class OnboardingPage:
                         # 거리 정보 표시 (있는 경우)
                         if distance is not None:
                             st.markdown(f"**🚶‍♂️ 거리:** {distance:.1f}km")
+
+                        # 주소 정보 표시 (있는 경우)
+                        if diner_num_address:
+                            st.markdown(f"**🏠 주소:** {diner_num_address}")
 
                         # 평가 섹션
                         st.markdown("---")
@@ -306,10 +312,6 @@ class OnboardingPage:
         disabled_label=None,
     ):
         """네비게이션 버튼 렌더링 helper 함수"""
-        # 디버깅 로그
-        current_step = st.session_state.get("onboarding_step", 0)
-        st.write(f"🔍 [DEBUG] Navigation: current_step={current_step}, prev_step={prev_step}, next_step={next_step}, next_condition={next_condition}")
-        
         col1, col2 = st.columns([1, 1])
         with col1:
             if st.button("◀ 이전", use_container_width=True):
@@ -320,14 +322,14 @@ class OnboardingPage:
                     if "restaurants_offset" in st.session_state:
                         del st.session_state.restaurants_offset
 
-                st.write(f"🔍 [DEBUG] 이전 버튼 클릭: {current_step} → {prev_step}")
+    
                 st.session_state.onboarding_step = prev_step
                 st.rerun()
 
         with col2:
             if next_condition:
                 if st.button(next_label, use_container_width=True, type="primary"):
-                    st.write(f"🔍 [DEBUG] 다음 버튼 클릭: {current_step} → {next_step}")
+        
                     st.session_state.onboarding_step = next_step
                     st.rerun()
             else:
@@ -342,7 +344,6 @@ class OnboardingPage:
 
         # 디버깅 로그
         current_step = st.session_state.get("onboarding_step", 0)
-        st.write(f"🔍 [DEBUG] render() 호출: onboarding_step={current_step}")
 
         # 진행 상태 표시
         self._render_progress_bar()
@@ -514,7 +515,6 @@ class OnboardingPage:
     def _render_simplified_preferences_step(self):
         """간소화된 선호 카테고리 단계"""
         # 디버깅 로그
-        st.write(f"🔍 [DEBUG] _render_simplified_preferences_step() 시작: onboarding_step={st.session_state.get('onboarding_step', 0)}")
         
         st.markdown("# 🍽️ 어떤 음식을 좋아하시나요?")
 
@@ -572,7 +572,6 @@ class OnboardingPage:
             st.session_state.user_profile["food_preferences_middle"] = {}
 
         # 디버깅 로그
-        st.write(f"🔍 [DEBUG] _render_simplified_preferences_step() 종료 전: onboarding_step={st.session_state.get('onboarding_step', 0)}")
 
         # 다음 단계 버튼
         self._render_navigation_buttons(1, 3)
@@ -858,57 +857,50 @@ class OnboardingPage:
                                 f"🔗 {similar['name']}",
                                 expanded=False,
                             ):
-                                col1, col2 = st.columns([1, 2])
 
-                                with col1:
-                                    # 이미지 표시 (기본 이미지 사용)
-                                    st.image(
-                                        "https://via.placeholder.com/150x100/FF6B6B/FFFFFF?text=Restaurant",
-                                        width=150,
+
+
+                                st.markdown(f"**{similar['name']}**")
+                                st.markdown(f"🏷️ {similar['category']}")
+                                if similar.get("distance"):
+                                    st.markdown(
+                                        f"🚶‍♂️ 거리: {similar['distance']}km"
+                                    )
+                                if similar.get("rating"):
+                                    st.markdown(f"⭐ 평점: {similar['rating']}")
+
+                                # 평가 키 생성
+                                similar_key = f"rating_similar_{similar['id']}"
+
+                                # 현재 평가 상태 표시
+                                current_similar_rating = (
+                                    st.session_state.restaurant_ratings.get(
+                                        similar_key, 0
+                                    )
+                                )
+                                if current_similar_rating > 0:
+                                    st.success(
+                                        f"✅ 이미 {current_similar_rating}점을 주셨습니다!"
+                                    )
+                                    rated_count += 1
+
+                                # st.feedback 사용
+                                similar_feedback = st.feedback(
+                                    options="stars",
+                                    key=f"feedback_similar_{similar['id']}_{restaurant['id']}_{idx}",
+                                )
+
+                                # 피드백 처리 (helper 메서드 사용)
+                                if similar_feedback is not None:
+                                    was_new_similar = current_similar_rating == 0
+                                    self._handle_feedback(
+                                        similar_key,
+                                        similar_feedback,
+                                        current_similar_rating,
                                     )
 
-                                with col2:
-                                    st.markdown(f"**{similar['name']}**")
-                                    st.markdown(f"🏷️ {similar['category']}")
-                                    if similar.get("distance"):
-                                        st.markdown(
-                                            f"🚶‍♂️ 거리: {similar['distance']}km"
-                                        )
-                                    if similar.get("rating"):
-                                        st.markdown(f"⭐ 평점: {similar['rating']}")
-
-                                    # 평가 키 생성
-                                    similar_key = f"rating_similar_{similar['id']}"
-
-                                    # 현재 평가 상태 표시
-                                    current_similar_rating = (
-                                        st.session_state.restaurant_ratings.get(
-                                            similar_key, 0
-                                        )
-                                    )
-                                    if current_similar_rating > 0:
-                                        st.success(
-                                            f"✅ 이미 {current_similar_rating}점을 주셨습니다!"
-                                        )
+                                    if was_new_similar:
                                         rated_count += 1
-
-                                    # st.feedback 사용
-                                    similar_feedback = st.feedback(
-                                        options="stars",
-                                        key=f"feedback_similar_{similar['id']}_{restaurant['id']}_{idx}",
-                                    )
-
-                                    # 피드백 처리 (helper 메서드 사용)
-                                    if similar_feedback is not None:
-                                        was_new_similar = current_similar_rating == 0
-                                        self._handle_feedback(
-                                            similar_key,
-                                            similar_feedback,
-                                            current_similar_rating,
-                                        )
-
-                                        if was_new_similar:
-                                            rated_count += 1
 
         # 더 많은 음식점 불러오기 버튼
         col1, col2, col3 = st.columns([1, 2, 1])
@@ -981,30 +973,6 @@ class OnboardingPage:
         )
 
     def _render_completion_step(self):
-        # get most similar kakao_reviewer_id using /rec/user/similar
-        request_body = {
-            "liked_diner_ids": [int(diner_id.split("_")[-1]) for diner_id in st.session_state.restaurant_ratings.keys()],
-            "scores_of_liked_diner_ids": [score for score in st.session_state.restaurant_ratings.values()],
-        }
-
-        response = self.api_requester.post(
-            api_path="/rec/user/similar",
-            data=request_body,
-        ).json()
-
-        # update matched kakao_reviewer_id into db
-        kakao_reviewer_id = response["reviewer_id"]
-        firebase_uid = get_current_user()["localId"]
-        self.api_requester.put(
-            api_path=f"/users/{firebase_uid}",
-            data={
-                "kakao_reviewer_id": str(kakao_reviewer_id)
-            },
-            params={
-                "user_id_type": "firebase_uid"
-            }
-        )
-
         """완료 단계"""
         st.markdown("# 🎉 설정이 완료되었습니다!")
 
@@ -1122,7 +1090,7 @@ class OnboardingPage:
             if self.onboarding_manager.save_user_profile(
                 st.session_state.user_profile, st.session_state.restaurant_ratings
             ):
-                st.success("✅ 설정이 저장되었습니다!")
+                # st.success("✅ 설정이 저장되었습니다!")
 
                 # 온보딩 완료 로그 기록
                 self._log_onboarding_completion()
@@ -1147,9 +1115,6 @@ class OnboardingPage:
                         loop.close()
 
                         if success:
-                            st.success(
-                                "✅ 온보딩 데이터가 PostgreSQL에 저장되었습니다."
-                            )
                             # 온보딩 완료 후 사용자 정보 캐시 삭제 (최신 정보로 갱신)
                             from utils.auth import clear_user_info_cache
 
@@ -1163,32 +1128,79 @@ class OnboardingPage:
                 except Exception as sync_error:
                     # 동기화 실패해도 Firestore에는 저장되었으므로 계속 진행
                     st.warning(f"⚠️ PostgreSQL 저장 중 오류: {str(sync_error)}")
-                    st.info("Firestore에는 정상적으로 저장되었습니다.")
+                    # st.info("Firestore에는 정상적으로 저장되었습니다.")
 
-                # 메인 앱으로 이동 (5초 후 자동 이동)
+                # /rec/user/similar API 호출 (진행 상황 표시)
+                with st.spinner("🔄 유사한 사용자 찾는 중... (최대 5분 소요)", show_time=True):
+                    try:
+                        # get most similar kakao_reviewer_id using /rec/user/similar
+                        request_body = {
+                            "liked_diner_ids": [
+                                int(diner_id.split("_")[-1])
+                                for diner_id in st.session_state.restaurant_ratings.keys()
+                            ],
+                            "scores_of_liked_diner_ids": [
+                                score
+                                for score in st.session_state.restaurant_ratings.values()
+                            ],
+                        }
+
+                        response = self.api_requester.post(
+                            api_path="/rec/user/similar",
+                            data=request_body,
+                            timeout=310,  # 5분 타임아웃
+                        ).json()
+
+                        # update matched kakao_reviewer_id into db
+                        kakao_reviewer_id = response["reviewer_id"]
+                        firebase_uid = get_current_user()["localId"]
+                        self.api_requester.put(
+                            api_path=f"/users/{firebase_uid}",
+                            data={"kakao_reviewer_id": str(kakao_reviewer_id)},
+                            params={"user_id_type": "firebase_uid"},
+                        )
+                        st.success("✅ 유사 사용자 매칭이 완료되었습니다!")
+                    except requests.exceptions.Timeout:
+                        st.warning(
+                            "⚠️ 유사 사용자 매칭이 시간 초과되었습니다. (5분 초과)"
+                        )
+                        st.info(
+                            "배치 프로그램으로 추후 완료됩니다. 개인화 추천은 아직 이용할 수 없지만, 다른 맛집 추천은 가능합니다."
+                        )
+                    except Exception as api_error:
+                        st.warning(
+                            f"⚠️ 유사 사용자 매칭 중 오류가 발생했습니다: {str(api_error)}"
+                        )
+                        st.info(
+                            "배치 프로그램으로 추후 완료됩니다. 개인화 추천은 아직 이용할 수 없지만, 다른 맛집 추천은 가능합니다."
+                        )
+
+                # 온보딩 완료 플래그 설정 및 페이지 이동
                 st.balloons()
-                # st.success("5초 후 메인 페이지로 이동합니다...")
+                st.success("🎉 온보딩이 완료되었습니다! 잠시 후 메인 페이지로 이동합니다...")
 
-                # JavaScript로 페이지 리디렉트 (임시 방법)
-                st.markdown(
-                    """
-                <script>
-                setTimeout(function() {
-                    window.location.reload();
-                }, 5000);
-                </script>
-                """,
-                    unsafe_allow_html=True,
-                )
+                # 온보딩 완료 플래그 설정 (세션 클리어 전에 설정)
+                onboarding_completed = True
+                
+                # 온보딩 관련 세션 상태만 초기화 (필요한 정보는 유지)
+                onboarding_keys = [
+                    "onboarding_step",
+                    "user_profile",
+                    "restaurant_ratings",
+                    "loaded_restaurants",
+                    "restaurants_offset",
+                    "total_rated_count",
+                    "rating_stats",
+                ]
+                for key in onboarding_keys:
+                    if key in st.session_state:
+                        del st.session_state[key]
 
-                if st.button("지금 바로 시작하기"):
-                    # 온보딩 완료 플래그 설정 (세션 클리어 전에 설정)
-                    onboarding_completed = True
-                    st.session_state.clear()  # 온보딩 상태 초기화
-                    st.session_state.onboarding_just_completed = (
-                        onboarding_completed  # 플래그 복원
-                    )
-                    st.rerun()
+                # 온보딩 완료 플래그 설정
+                st.session_state.onboarding_just_completed = onboarding_completed
+
+                # 페이지 리디렉트를 위해 rerun
+                st.rerun()
             else:
                 st.error("❌ 저장 중 오류가 발생했습니다. 다시 시도해주세요.")
 

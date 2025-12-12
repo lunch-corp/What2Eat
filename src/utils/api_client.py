@@ -295,15 +295,11 @@ class YamYamOpsClient:
             if radius_km is not None:
                 params["radius_km"] = radius_km
             if large_categories:
-                # 여러 카테고리를 지원하려면 리스트로 전달 (FastAPI가 자동 처리)
-                # 단일 값으로 전달하는 경우 첫 번째 값만 사용
-                params["diner_category_large"] = (
-                    large_categories[0] if large_categories else None
-                )
+                # 여러 카테고리를 지원하도록 리스트 전체를 전달 (FastAPI가 자동 처리)
+                params["diner_category_large"] = large_categories
             if middle_categories:
-                params["diner_category_middle"] = (
-                    middle_categories[0] if middle_categories else None
-                )
+                # 여러 카테고리를 지원하도록 리스트 전체를 전달 (FastAPI가 자동 처리)
+                params["diner_category_middle"] = middle_categories
             if sort_by:
                 params["sort_by"] = sort_by
             if limit is not None:
@@ -352,12 +348,12 @@ class YamYamOpsClient:
                 "radius_km": radius_km,
             }
 
-            # 카테고리 파라미터 추가 (현재 API는 단일 값만 지원하므로 첫 번째 값 사용)
+            # 카테고리 파라미터 추가 (여러 카테고리를 지원하도록 리스트 전체를 전달)
             if large_categories and len(large_categories) > 0:
-                params["diner_category_large"] = large_categories[0]
+                params["diner_category_large"] = large_categories
 
             if middle_categories and len(middle_categories) > 0:
-                params["diner_category_middle"] = middle_categories[0]
+                params["diner_category_middle"] = middle_categories
 
             if limit is not None:
                 params["limit"] = limit

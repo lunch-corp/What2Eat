@@ -3,17 +3,13 @@
 import streamlit as st
 
 from config.constants import LOGO_SMALL_IMG_PATH, LOGO_TITLE_IMG_PATH
-from pages import chat_page, my_page, ranking_page, search_filter_page, worldcup_page
+from pages import (chat_page, my_page, ranking_page, search_filter_page,
+                   worldcup_page)
 from pages.onboarding import OnboardingPage
 from utils.analytics import load_analytics
 from utils.app import What2EatApp
-from utils.auth import (
-    AuthManager,
-    auth_form,
-    get_current_user,
-    has_completed_onboarding,
-    logout,
-)
+from utils.auth import (AuthManager, auth_form, get_current_user,
+                        has_completed_onboarding, logout)
 
 
 def login_page():
@@ -38,7 +34,7 @@ def configure_page(is_authenticated: bool = False):
         initial_sidebar_state="expanded" if is_authenticated else "collapsed",
     )
     st.logo(
-        link="https://what2eat-chat.streamlit.app/",
+        link="https://what2eat.streamlit.app/",
         image=LOGO_SMALL_IMG_PATH,
         icon_image=LOGO_TITLE_IMG_PATH,
     )
@@ -94,10 +90,6 @@ def main():
 
     # 인증 상태 확인
     is_authenticated = auth_manager.check_authentication()
-
-    print("[메인] 🔍 인증 확인")
-    print(f"  - 인증 상태: {is_authenticated}")
-    print(f"  - 세션에 JWT 토큰: {bool(st.session_state.get('jwt_access_token'))}")
 
     # 페이지 설정 및 분석 로드
     configure_page(is_authenticated)

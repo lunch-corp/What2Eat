@@ -89,6 +89,7 @@ class APIRequester:
         api_path: str,
         data: Optional[dict[str, Any]] = None,
         headers: Optional[dict[str, str]] = None,
+        timeout: Optional[float] = None,
     ) -> requests.Response:
         """
         Make a POST request.
@@ -97,6 +98,7 @@ class APIRequester:
             api_path: API path to append to endpoint (e.g., '/rec/user/similar')
             data: JSON data to send in request body
             headers: Request headers
+            timeout: Request timeout in seconds (None for no timeout)
 
         Returns:
             Response object
@@ -105,7 +107,7 @@ class APIRequester:
         request_headers = self._get_headers(headers)
 
         try:
-            response = requests.post(url, json=data, headers=request_headers)
+            response = requests.post(url, json=data, headers=request_headers, timeout=timeout)
             response.raise_for_status()
             return response
         except requests.exceptions.RequestException as e:

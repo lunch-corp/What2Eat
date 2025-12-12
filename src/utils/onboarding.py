@@ -122,7 +122,11 @@ class OnboardingManager:
         offset: int = 0,
         limit: int = 10,
     ) -> list[dict[str, Any]]:
-        """선호 카테고리 기반 음식점 조회 (페이징 지원, API 호출)"""
+        """선호 카테고리 기반 음식점 조회 (페이징 지원, API 호출)
+        
+        여러 카테고리를 전달받으면 각 카테고리별로 API를 호출하고,
+        결과를 합친 후 popularity 기준으로 정렬하여 반환합니다.
+        """
         # 현재 사용자 위치 정보 가져오기
         if "user_lat" not in st.session_state or "user_lon" not in st.session_state:
             return []
@@ -227,7 +231,7 @@ class OnboardingManager:
                 db.collection("users").document(uid).collection(
                     "onboarding_logs"
                 ).document("profile").set(save_data)
-                st.success("✅ 프로필이 성공적으로 저장되었습니다!")
+
             except Exception as firestore_error:
                 st.warning(f"⚠️ Firestore 저장 실패: {str(firestore_error)}")
                 # Firestore 저장 실패해도 계속 진행
