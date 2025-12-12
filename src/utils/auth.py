@@ -12,6 +12,112 @@ from utils.firebase_logger import get_firebase_logger
 from utils.session_manager import get_session_manager
 
 
+class AuthManager:
+    """인증 관리 클래스 - 쿠키 기반 세션 관리"""
+    
+    def __init__(self):
+        self.session_manager = get_session_manager()
+        self.cookie_manager = self.session_manager.cookie_manager
+        self.cookie_key = "jwt_access_token"  # JWT Access Token 쿠키 키
+    
+    def init_session_state(self):
+        """세션 상태 초기화 및 쿠키에서 인증 상태 복원"""
+        # 세션 상태 초기화는 SessionManager에서 처리
+        self.session_manager._initialize_session_state()
+        
+        # 이미 로그인된 경우 토큰 유효성 검증
+        if st.session_state.get("is_authenticated", False):
+            if not self.check_authentication():
+                self.clear_auth_state()
+            return
+        
+        # 로그인된 상태가 아닐 때만 쿠키 복원 시도
+        if not st.session_state.get("is_authenticated", False):
+            # 쿠키 복원 시도 플래그 확인 (한 번만 시도)
+            if st.session_state.get("_cookie_restore_attempted", False):
+                return
+            
+            # 쿠키 복원 시도 플래그 설정
+            st.session_state._cookie_restore_attempted = True
+            
+            try:
+                # 레퍼런스 패턴: 단일 쿠키만 읽기 (get_all()은 무한 반복 발생)
+                jwt_token = self.cookie_manager.get(self.cookie_key)
+                
+                # JWT 토큰이 있으면 복원 시도
+                if jwt_token:
+
+                    # JWT 토큰을 세션 상태에 저장
+                    st.session_state.jwt_access_token = jwt_token
+                    
+                    # JWT 토큰 검증 (내부에서 get_all() 호출하지 않도록 직접 검증)
+                    if self.session_manager._verify_jwt_token_with_yamyam_ops():
+                        st.session_state.is_authenticated = True
+                         # 복원 성공 시 페이지 재실행 (한 번만)
+                        if not st.session_state.get("_cookie_restore_rerun", False):
+                            st.session_state._cookie_restore_rerun = True
+                            st.rerun()
+                    else:
+                         self.clear_auth_state()
+                else:
+                    print("[AuthManager] 쿠키에 JWT 토큰 없음")
+            except Exception as e:
+                print(f"[AuthManager] 쿠키 복원 중 오류: {e}")
+                self.clear_auth_state()
+    
+    def clear_auth_state(self):
+        """인증 관련 세션 상태와 쿠키 초기화"""
+        try:
+            # 쿠키 삭제 (레퍼런스 패턴: key 파라미터 없이 사용)
+            # JWT Access Token 쿠키 삭제
+            try:
+                if self.cookie_manager.get(self.cookie_key):
+                    self.cookie_manager.delete(self.cookie_key)
+            except Exception:
+                pass
+            # JWT Refresh Token 쿠키 삭제
+            try:
+                if self.cookie_manager.get(self.session_manager.jwt_refresh_cookie_key):
+                    self.cookie_manager.delete(self.session_manager.jwt_refresh_cookie_key)
+            except Exception:
+                pass
+        except Exception:
+            pass
+        
+        # 세션 상태 초기화
+        st.session_state.is_authenticated = False
+        st.session_state.auth_token = None
+        st.session_state.user_info = None
+        st.session_state.jwt_access_token = None
+        st.session_state.jwt_refresh_token = None
+        # 쿠키 복원 시도 플래그도 초기화
+        st.session_state._cookie_restore_attempted = False
+        st.session_state._cookie_restore_rerun = False
+    
+    def check_authentication(self) -> bool:
+        """세션의 인증 상태를 확인"""
+        return self.session_manager.check_authentication()
+    
+    def save_user_session(
+        self,
+        user_data: Dict[str, Any],
+        id_token: str,
+        refresh_token: str = None,
+        jwt_access_token: str = None,
+        jwt_refresh_token: str = None,
+        jwt_expires_in: int = None,
+    ):
+        """사용자 세션 정보 저장 (쿠키 포함)"""
+        return self.session_manager.save_user_session(
+            user_data,
+            id_token,
+            refresh_token,
+            jwt_access_token,
+            jwt_refresh_token,
+            jwt_expires_in,
+        )
+
+
 def map_kr_jamo_to_en(text: str) -> str:
     """한글(두벌식) 자모를 대응하는 QWERTY 영문 키로 변환합니다.
 
@@ -49,7 +155,8 @@ class FirebaseAuth:
     """Firebase Authentication을 관리하는 클래스"""
 
     def __init__(self):
-        self.session_manager = get_session_manager()
+        self.auth_manager = AuthManager()
+        self.session_manager = self.auth_manager.session_manager
 
         # if not is_firebase_configured():
         #     st.error("❌ Firebase가 설정되지 않았습니다. 설정을 확인해주세요.")
@@ -97,13 +204,72 @@ class FirebaseAuth:
 
             # 회원가입 후 자동 로그인을 위해 토큰 생성
             custom_token = auth.create_custom_token(user.uid)
+            
+            # Custom Token을 Firebase ID Token으로 교환
+            firebase_id_token = None
+            refresh_token = None
+            try:
+                import requests
+                
+                FIREBASE_WEB_API_KEY = st.secrets.get("FIREBASE_WEB_API_KEY")
+                if FIREBASE_WEB_API_KEY:
+                    url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key={FIREBASE_WEB_API_KEY}"
+                    payload = {
+                        "token": custom_token.decode(),
+                        "returnSecureToken": True
+                    }
+                    response = requests.post(url, json=payload)
+                    if response.status_code == 200:
+                        token_data = response.json()
+                        firebase_id_token = token_data.get("idToken")
+                        refresh_token = token_data.get("refreshToken")
+            except Exception:
+                pass  # Custom Token 교환 실패해도 회원가입은 성공
+            
+            # JWT 토큰 받기 (Firebase ID Token이 있는 경우)
+            jwt_tokens = None
+            if firebase_id_token:
+                jwt_tokens = self._get_jwt_tokens_from_yamyam_ops(firebase_id_token)
 
-            # 세션에 저장
-            self.session_manager.save_user_session(
+            # 세션에 저장 (AuthManager를 통해 쿠키도 함께 저장)
+            self.auth_manager.save_user_session(
                 user_data,
-                custom_token.decode(),
-                None,  # 회원가입 시에는 refresh_token이 없음
+                firebase_id_token or custom_token.decode(),
+                refresh_token,
+                jwt_access_token=jwt_tokens.get("access_token") if jwt_tokens else None,
+                jwt_refresh_token=jwt_tokens.get("refresh_token") if jwt_tokens else None,
+                jwt_expires_in=jwt_tokens.get("expires_in") if jwt_tokens else None,
             )
+
+            # PostgreSQL에 사용자 동기화 (비동기 처리)
+            try:
+                import asyncio
+
+                from utils.api_client import get_yamyam_ops_client
+
+                client = get_yamyam_ops_client()
+                if client:
+                    # 비동기 함수를 동기적으로 실행
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    success = loop.run_until_complete(
+                        client.sync_user_from_firebase(
+                            user.uid, user.email, user.display_name or email.split("@")[0]
+                        )
+                    )
+                    loop.close()
+
+                    if success:
+                        st.success("✅ 사용자 정보가 동기화되었습니다.")
+                    else:
+                        st.warning(
+                            "⚠️ 사용자 정보 동기화에 실패했습니다. 나중에 다시 시도됩니다."
+                        )
+                else:
+                    st.warning("⚠️ API 클라이언트를 초기화할 수 없습니다.")
+            except Exception as sync_error:
+                # 동기화 실패해도 회원가입은 성공으로 처리
+                st.warning(f"⚠️ 사용자 정보 동기화 중 오류: {str(sync_error)}")
 
             return user_data
 
@@ -155,11 +321,22 @@ class FirebaseAuth:
                     "disabled": False,
                 }
 
-                # 세션 매니저를 통해 로그인 상태 저장
-                if self.session_manager.save_user_session(
-                    user_data, auth_result["id_token"], auth_result["refresh_token"]
+                # yamyam-ops의 /login 엔드포인트 호출하여 JWT 토큰 받기
+                jwt_tokens = self._get_jwt_tokens_from_yamyam_ops(auth_result["id_token"])
+                
+                # 세션 매니저를 통해 로그인 상태 저장 (AuthManager를 통해 쿠키도 함께 저장)
+                if self.auth_manager.save_user_session(
+                    user_data, 
+                    auth_result["id_token"], 
+                    auth_result["refresh_token"],
+                    jwt_access_token=jwt_tokens.get("access_token") if jwt_tokens else None,
+                    jwt_refresh_token=jwt_tokens.get("refresh_token") if jwt_tokens else None,
+                    jwt_expires_in=jwt_tokens.get("expires_in") if jwt_tokens else None,
                 ):
-                    st.success("✅ 로그인되었습니다!")
+                    if jwt_tokens:
+                        st.success("✅ 로그인되었습니다!")
+                    else:
+                        st.warning("⚠️ 로그인되었지만 JWT 토큰 발급에 실패했습니다. 일부 기능이 제한될 수 있습니다.")
                     return user_data
                 else:
                     st.error("❌ 세션 저장에 실패했습니다.")
@@ -170,6 +347,46 @@ class FirebaseAuth:
 
         except Exception as e:
             st.error(f"❌ 로그인 중 오류가 발생했습니다: {str(e)}")
+            return None
+
+    def _get_jwt_tokens_from_yamyam_ops(self, firebase_id_token: str) -> Optional[Dict[str, Any]]:
+        """yamyam-ops의 /login 엔드포인트를 호출하여 JWT 토큰 받기"""
+        try:
+            api_url = st.secrets.get("API_URL")
+            if not api_url:
+                logger = get_firebase_logger()
+                logger.log_user_activity(
+                    None, "error", {"message": "API_URL이 설정되지 않았습니다."}
+                )
+                return None
+
+            url = f"{api_url.rstrip('/')}/auth/login"
+            payload = {"firebase_token": firebase_id_token}
+            response = requests.post(url, json=payload, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                return {
+                    "access_token": data.get("access_token"),
+                    "refresh_token": data.get("refresh_token"),
+                    "token_type": data.get("token_type", "bearer"),
+                    "expires_in": data.get("expires_in"),
+                }
+            else:
+                # 로그인 실패는 경고만 표시 (Firebase 로그인은 성공했으므로)
+                error_msg = response.text
+                logger = get_firebase_logger()
+                logger.log_user_activity(
+                    None, "error", {"message": f"yamyam-ops JWT 토큰 발급 실패: {error_msg}"}
+                )
+                return None
+                
+        except Exception as e:
+            # 예외 발생해도 Firebase 로그인은 성공했으므로 경고만 표시
+            logger = get_firebase_logger()
+            logger.log_user_activity(
+                None, "error", {"message": f"yamyam-ops JWT 토큰 발급 중 오류: {str(e)}"}
+            )
             return None
 
     def _authenticate_user_with_rest_api(
@@ -258,6 +475,7 @@ class FirebaseAuth:
 
     def sign_out(self):
         """로그아웃"""
+        self.auth_manager.clear_auth_state()
         self.session_manager.logout()
 
     def verify_id_token(self, id_token: str) -> Optional[Dict[str, Any]]:
@@ -372,6 +590,9 @@ def get_current_user():
 
 def logout():
     """로그아웃"""
+    # 사용자 정보 캐시 삭제
+    clear_user_info_cache()
+    
     session_manager = get_session_manager()
     session_manager.logout()
 
@@ -406,7 +627,23 @@ def is_first_login() -> bool:
 
 
 def has_completed_onboarding() -> bool:
-    """사용자가 온보딩을 완료했는지 확인"""
+    """사용자가 온보딩을 완료했는지 확인 (PostgreSQL API 기반)"""
+    try:
+        # 캐시된 사용자 정보 사용
+        cached_info = get_cached_user_info()
+        if cached_info:
+            return cached_info.get("has_completed_onboarding", False)
+        
+        # 캐시 조회 실패 시 Firestore 폴백
+        return _check_onboarding_from_firestore()
+
+    except Exception as e:
+        st.error(f"온보딩 완료 확인 중 오류: {str(e)}")
+        return False
+
+
+def _check_onboarding_from_firestore() -> bool:
+    """Firestore에서 온보딩 완료 여부 확인 (폴백 메서드)"""
     try:
         user_info = get_current_user()
         if not user_info:
@@ -431,9 +668,105 @@ def has_completed_onboarding() -> bool:
 
         return False
 
-    except Exception as e:
-        st.error(f"온보딩 완료 확인 중 오류: {str(e)}")
+    except Exception:
         return False
+
+
+def get_cached_user_info() -> Optional[Dict[str, Any]]:
+    """
+    캐시된 사용자 정보 반환 (API 중복 호출 방지)
+    
+    캐시가 없거나 만료된 경우 API를 호출하여 새로 가져옵니다.
+    
+    Returns:
+        사용자 정보 딕셔너리 또는 None
+    """
+    from datetime import datetime, timedelta
+    
+    try:
+        # 캐시 유효 시간 (5분)
+        cache_validity = timedelta(minutes=5)
+        
+        # 캐시된 정보 확인
+        if "cached_user_info" in st.session_state and "cached_user_info_time" in st.session_state:
+            cache_time = st.session_state.cached_user_info_time
+            if datetime.now() - cache_time < cache_validity:
+                return st.session_state.cached_user_info
+        
+        # 캐시가 없거나 만료된 경우 API 호출
+        user_info = get_current_user()
+        if not user_info:
+            return None
+        
+        try:
+            import asyncio
+
+            from utils.api_client import get_yamyam_ops_client
+            
+            client = get_yamyam_ops_client()
+            if not client:
+                return None
+            
+            # 비동기 API 호출을 동기적으로 실행
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            user_data = loop.run_until_complete(client.get_current_user_info())
+            loop.close()
+            
+            if user_data:
+                # 캐시에 저장
+                st.session_state.cached_user_info = user_data
+                st.session_state.cached_user_info_time = datetime.now()
+                return user_data
+            
+            return None
+            
+        except Exception as api_error:
+            logger = get_firebase_logger()
+            if logger.is_available():
+                logger.log_error("get_cached_user_info", str(api_error))
+            return None
+    
+    except Exception as e:
+        return None
+
+
+def clear_user_info_cache():
+    """사용자 정보 캐시 삭제 (로그아웃 시 또는 온보딩 완료 시 호출)"""
+    if "cached_user_info" in st.session_state:
+        del st.session_state.cached_user_info
+    if "cached_user_info_time" in st.session_state:
+        del st.session_state.cached_user_info_time
+
+
+def get_user_personalization_status() -> Dict[str, Any]:
+    """
+    사용자 개인화 설정 상태 조회
+    
+    Returns:
+        has_completed_onboarding, is_personalization_enabled 등을 포함한 딕셔너리
+    """
+    try:
+        # 캐시된 사용자 정보 사용
+        cached_info = get_cached_user_info()
+        if cached_info:
+            return {
+                "has_completed_onboarding": cached_info.get("has_completed_onboarding", False),
+                "is_personalization_enabled": cached_info.get("is_personalization_enabled", False),
+            }
+        
+        # 캐시 조회 실패 시 기본값 반환
+        return {
+            "has_completed_onboarding": False,
+            "is_personalization_enabled": False,
+        }
+
+    except Exception as e:
+        st.error(f"개인화 설정 확인 중 오류: {str(e)}")
+        return {
+            "has_completed_onboarding": False,
+            "is_personalization_enabled": False,
+        }
 
 
 def require_auth(func):

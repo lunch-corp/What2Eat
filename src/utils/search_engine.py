@@ -3,16 +3,14 @@
 """
 
 import logging
+import re
 
 import pandas as pd
+from fuzzywuzzy import fuzz
+from jamo import hangul_to_jamo
 
 # 로거 설정
 logger = logging.getLogger(__name__)
-
-import re
-
-from fuzzywuzzy import fuzz
-from jamo import hangul_to_jamo
 
 
 class DinerSearchEngine:
@@ -31,15 +29,12 @@ class DinerSearchEngine:
         self.diner_infos = []
 
         for _, row in df_basic.iterrows():
-            diner_info = {
-                "idx": str(row["diner_idx"]), 
-                "name": row["diner_name"]
-            }
-            
+            diner_info = {"idx": str(row["diner_idx"]), "name": row["diner_name"]}
+
             # 거리 정보가 있으면 추가
             if "distance" in row and pd.notna(row["distance"]):
                 diner_info["distance"] = float(row["distance"])
-            
+
             self.diner_infos.append(diner_info)
 
         logger.info(f"검색 엔진 초기화 완료: {len(self.diner_infos)}개 음식점")
@@ -70,7 +65,7 @@ class DinerSearchEngine:
         if exact_matches:
             results = pd.DataFrame(exact_matches).assign(
                 match_type="정확한 매칭",
-                jamo_score=1.0  # 정확한 매칭은 최고 점수
+                jamo_score=1.0,  # 정확한 매칭은 최고 점수
             )
             # 거리 정보가 있으면 거리 순으로 정렬
             if "distance" in results.columns:
@@ -84,7 +79,7 @@ class DinerSearchEngine:
         if partial_matches:
             results = pd.DataFrame(partial_matches).assign(
                 match_type="부분 매칭",
-                jamo_score=0.8  # 부분 매칭은 높은 점수
+                jamo_score=0.8,  # 부분 매칭은 높은 점수
             )
             # 거리 정보가 있으면 거리 순으로 정렬
             if "distance" in results.columns:
@@ -94,29 +89,31 @@ class DinerSearchEngine:
         # 3. 자모 기반 매칭
         jamo_candidates = []
         exact_jamo_match = None
-        
+
         for d in self.diner_infos:
             is_jamo, score = self._jamo_similarity(
                 norm_query, self._normalize(d["name"]), threshold=jamo_threshold
             )
-            
+
             if is_jamo:
                 # 정확한 자모 매칭 발견
                 exact_jamo_match = {
                     "name": d["name"],
                     "idx": d["idx"],
                     "jamo_score": score,
-                    "match_type": "자모 매칭"
+                    "match_type": "자모 매칭",
                 }
                 break
             elif score > jamo_candidate_threshold:
                 # 후보 자모 매칭 추가 (top_k개만 유지)
-                jamo_candidates.append({
-                    "name": d["name"],
-                    "idx": d["idx"],
-                    "jamo_score": score,
-                    "match_type": "자모 매칭"
-                })
+                jamo_candidates.append(
+                    {
+                        "name": d["name"],
+                        "idx": d["idx"],
+                        "jamo_score": score,
+                        "match_type": "자모 매칭",
+                    }
+                )
                 # 점수 순으로 정렬하고 top_k개만 유지
                 jamo_candidates.sort(key=lambda x: x["jamo_score"], reverse=True)
                 if len(jamo_candidates) > top_k:
@@ -126,17 +123,14 @@ class DinerSearchEngine:
         if exact_jamo_match:
             results = pd.DataFrame([exact_jamo_match])
             return self._add_kakao_map_links(results)
-        
+
         # 후보 자모 매칭이 있으면 반환
         if jamo_candidates:
             results = pd.DataFrame(jamo_candidates)
             return self._add_kakao_map_links(results)
-        
+
         # 검색 결과 없음
-        return pd.DataFrame().assign(
-            match_type="검색 결과 없음",
-            jamo_score=0.0
-        )
+        return pd.DataFrame().assign(match_type="검색 결과 없음", jamo_score=0.0)
 
     def _normalize(self, text: str) -> str:
         """
@@ -167,7 +161,7 @@ class DinerSearchEngine:
         a_jamo = " ".join(hangul_to_jamo(a))
         b_jamo = " ".join(hangul_to_jamo(b))
         score = fuzz.ratio(a_jamo, b_jamo) / 100.0  # 0-100을 0-1로 변환
-        
+
         if score > threshold:
             return True, score
         else:

@@ -138,4 +138,3 @@ def get_restaurant_history(uid: str):
             )
 
     return restaurant_history
-

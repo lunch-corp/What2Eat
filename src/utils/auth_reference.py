@@ -1,11 +1,10 @@
 # utils/auth.py
 import asyncio
-import time
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import extra_streamlit_components as stx
 import streamlit as st
-from zoneinfo import ZoneInfo
 
 from utils.language import get_text
 
@@ -29,7 +28,7 @@ class AuthManager:
             st.session_state.user = None
         if "user_info" not in st.session_state:
             st.session_state.user_info = []
-            
+
         # 이미 로그인된 경우 토큰 유효성 검증
         if st.session_state.logged_in and st.session_state.token:
             try:
@@ -48,7 +47,7 @@ class AuthManager:
                 try:
                     self.api.set_token(token)
                     token_data = self.api.verify_token()
-                    
+
                     if token_data:
                         st.session_state.token = token
                         st.session_state.logged_in = True
@@ -71,7 +70,7 @@ class AuthManager:
                 self.cookie_manager.delete(self.cookie_key)
         except Exception:
             pass
-            
+
         # 세션 상태 초기화
         st.session_state.logged_in = False
         st.session_state.token = None
@@ -108,7 +107,9 @@ class AuthManager:
             if login_response.get("status") == 500 and "error" in login_response:
                 error_msg = login_response.get("error", "")
                 if "Connection refused" in error_msg:
-                    raise ValueError("API 서버 연결 오류. 서버가 실행 중인지 확인하세요.")
+                    raise ValueError(
+                        "API 서버 연결 오류. 서버가 실행 중인지 확인하세요."
+                    )
                 else:
                     raise ValueError(login_response.get("message", "로그인 실패"))
 
@@ -123,10 +124,10 @@ class AuthManager:
                 raise ValueError(login_response.get("message", "로그인 실패"))
 
             access_token = login_response.get("access_token")
-            
+
             if not access_token:
                 raise ValueError("토큰 발급 실패. 서버 응답을 확인하세요.")
-                
+
             self.api.set_token(access_token)
             decoded_token = AdminUser(**self.api.verify_token())
 
@@ -145,10 +146,10 @@ class AuthManager:
             st.session_state.token = access_token
             st.session_state.user = decoded_token
             st.session_state.user_info = user_response
-            st.session_state.last_login = datetime.now(
-                ZoneInfo("Asia/Tokyo")
-            ).strftime("%Y-%m-%d %H:%M:%S")
-            
+            st.session_state.last_login = datetime.now(ZoneInfo("Asia/Tokyo")).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+
             return True
 
         except ValueError as e:

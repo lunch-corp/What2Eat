@@ -39,7 +39,10 @@ def render_dialog():
         return
 
     # 검색 결과 확인
-    if "search_results" not in st.session_state or st.session_state.search_results is None:
+    if (
+        "search_results" not in st.session_state
+        or st.session_state.search_results is None
+    ):
         st.warning("⚠️ 검색 결과가 없습니다.")
         st.info("💡 '맛집 검색' 페이지에서 먼저 검색을 실행해주세요.")
         return
@@ -73,7 +76,7 @@ def render_dialog():
     )
 
     st.markdown('<hr style="margin: 8px 0;">', unsafe_allow_html=True)
-    
+
     if map_data and "center" in map_data:
         new_center = map_data["center"]
         if new_center:
@@ -82,18 +85,24 @@ def render_dialog():
             lon_diff = abs(new_center["lng"] - st.session_state.map_center_lon)
 
             if lat_diff > 0.01 or lon_diff > 0.01:
-                st.warning(f"📍 지도 중심이 변경되었습니다. (이동 거리: 약 {lat_diff * 111:.1f}km)")
-                
+                st.warning(
+                    f"📍 지도 중심이 변경되었습니다. (이동 거리: 약 {lat_diff * 111:.1f}km)"
+                )
 
-                if st.button("📍 현 위치에서 재검색", use_container_width=True, type="primary", key="research_btn"):
+                if st.button(
+                    "📍 현 위치에서 재검색",
+                    use_container_width=True,
+                    type="primary",
+                    key="research_btn",
+                ):
                     # 위치 업데이트 (사용자 위치는 고정, 검색 중심만 변경)
                     st.session_state.map_center_lat = new_center["lat"]
                     st.session_state.map_center_lon = new_center["lng"]
-                    
+
                     # 자동으로 재검색 실행
                     app = st.session_state.app
                     search_filter = SearchFilter(app.df_diner)
-                    
+
                     # 기존 필터 사용하여 재검색 (새로운 중심 좌표 사용)
                     if "search_filters" in st.session_state:
                         filters = st.session_state.search_filters
@@ -108,12 +117,11 @@ def render_dialog():
                             if filters["middle_categories"]
                             else None,
                             sort_by=filters["sort_by"],
-                            period=filters["period"],
                         )
-                        
+
                         # 결과 저장
                         st.session_state.search_results = df_results
-                        
+
                         # 로깅
                         _log_user_activity(
                             "map_center_changed_research",
@@ -123,11 +131,12 @@ def render_dialog():
                                 "results_count": len(df_results),
                             },
                         )
-                        
+
                         st.success("✅ 재검색이 완료되었습니다!")
                         st.rerun()
                     else:
-                        st.warning("⚠️ 검색 필터 정보가 없습니다. '맛집 검색' 페이지에서 먼저 검색해주세요.")
+                        st.warning(
+                            "⚠️ 검색 필터 정보가 없습니다. '맛집 검색' 페이지에서 먼저 검색해주세요."
+                        )
             else:
                 st.success("✅ 현재 위치에서 검색 중입니다.")
-

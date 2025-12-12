@@ -31,6 +31,9 @@ KAKAO_API_HEADERS = {"Authorization": f"KakaoAK {st.secrets['REST_API_KEY']}"}
 GOOGLE_ANALYTIC_ID = st.secrets["GOOGLE_ANALYTIC_ID"]
 MICROSOFT_CLARITY_ID = st.secrets["MICROSOFT_CLARITY_ID"]
 
+# yamyam-ops API URL
+API_URL = st.secrets.get("API_URL", "http://localhost:8000")
+
 # 우선순위를 정의
 PRIORITY_ORDER = {"한식": 1, "중식": 2, "일식": 2, "양식": 2}
 
@@ -41,7 +44,7 @@ GRADE_COLORS = {
     1: [255, 140, 0],  # 파랑
 }
 
-GRADE_MAP = {"🌟": 1, "🌟��": 2, "🌟🌟🌟": 3}
+GRADE_MAP = {"🌟": 1, "🌟🌟": 2, "🌟🌟🌟": 3}
 
 # large category sorted by priority
 LARGE_CATEGORIES = [

@@ -1,5 +1,5 @@
 import json
-from typing import Any, Dict, List
+from typing import Any
 
 import firebase_admin
 import streamlit as st
@@ -52,7 +52,7 @@ class FirebaseLogger:
         return self.db is not None
 
     def _log_to_collection(
-        self, uid: str, collection_name: str, activity_type: str, detail: Dict[str, Any]
+        self, uid: str, collection_name: str, activity_type: str, detail: dict[str, Any]
     ) -> bool:
         """특정 컬렉션에 로그 저장"""
         if not self.is_available():
@@ -119,7 +119,7 @@ class FirebaseLogger:
 
     # ========== 검색 관련 로그 (search_logs) ==========
     def log_location_search(
-        self, uid: str, location: str, coordinates: Dict[str, float] = None
+        self, uid: str, location: str, coordinates: dict[str, float] = None
     ):
         """위치 검색 로그"""
         detail = {"location": location, "coordinates": coordinates}
@@ -135,7 +135,7 @@ class FirebaseLogger:
         uid: str,
         question: str,
         response: str,
-        restaurants: List[Dict[str, Any]] = None,
+        restaurants: list[dict[str, Any]] = None,
     ):
         """채팅 상호작용 로그"""
         detail = {
@@ -268,7 +268,7 @@ class FirebaseLogger:
 
     # ========== 기존 호환성을 위한 메서드 ==========
     def log_user_activity(
-        self, uid: str, activity_type: str, detail: Dict[str, Any]
+        self, uid: str, activity_type: str, detail: dict[str, Any]
     ) -> bool:
         """기존 호환성을 위한 통합 로그 메서드 (컬렉션 자동 분류)"""
         # 활동 타입에 따라 적절한 컬렉션으로 자동 분류
@@ -342,7 +342,7 @@ class FirebaseLogger:
             st.error(f"❌ 사용자 위치 저장 중 오류가 발생했습니다: {str(e)}")
             return False
 
-    def get_user_location(self, uid: str) -> Dict[str, Any]:
+    def get_user_location(self, uid: str) -> dict[str, Any]:
         """사용자의 마지막 위치 정보를 Firestore에서 불러오기"""
         if not self.is_available():
             return None
@@ -372,7 +372,7 @@ class FirebaseLogger:
     # ========== 조회 메서드 ==========
     def get_user_logs(
         self, uid: str, limit: int = 10, collection_name: str = None
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """사용자 활동 로그 조회 (특정 컬렉션 또는 전체)"""
         if not self.is_available():
             return []
@@ -438,7 +438,7 @@ class FirebaseLogger:
             st.error(f"❌ 활동 로그 조회 중 오류가 발생했습니다: {str(e)}")
             return []
 
-    def get_user_statistics(self, uid: str) -> Dict[str, Any]:
+    def get_user_statistics(self, uid: str) -> dict[str, Any]:
         """사용자 통계 정보 조회 (모든 컬렉션 통합)"""
         if not self.is_available():
             return {}
@@ -512,7 +512,7 @@ def get_firebase_logger() -> FirebaseLogger:
     return _firebase_logger
 
 
-def log_user_activity(activity_type: str, detail: Dict[str, Any]) -> bool:
+def log_user_activity(activity_type: str, detail: dict[str, Any]) -> bool:
     """사용자 활동 로그 저장 (편의 함수)"""
     logger = get_firebase_logger()
     if "user_info" in st.session_state and st.session_state.user_info:

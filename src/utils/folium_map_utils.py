@@ -3,7 +3,6 @@
 
 import folium
 import pandas as pd
-import streamlit as st
 from streamlit_folium import st_folium
 
 
@@ -49,18 +48,18 @@ class FoliumMapRenderer:
             # 팝업 HTML 생성
             popup_html = f"""
             <div style="width: 250px; font-family: Arial;">
-                <h4 style="margin-bottom: 10px;">{row['diner_name']}</h4>
+                <h4 style="margin-bottom: 10px;">{row["diner_name"]}</h4>
                 <p style="margin: 5px 0;">
-                    <strong>카테고리:</strong> {row.get('diner_category_middle', row.get('diner_category_large', 'N/A'))}
+                    <strong>카테고리:</strong> {row.get("diner_category_middle", row.get("diner_category_large", "N/A"))}
                 </p>
                 <p style="margin: 5px 0;">
-                    <strong>등급:</strong> {'⭐' * int(grade)}
+                    <strong>등급:</strong> {"⭐" * int(grade)}
                 </p>
                 <p style="margin: 5px 0;">
-                    <strong>리뷰:</strong> {row.get('diner_review_cnt', 0)}개
+                    <strong>리뷰:</strong> {row.get("diner_review_cnt", 0)}개
                 </p>
                 <p style="margin: 10px 0;">
-                    <a href="https://place.map.kakao.com/{row['diner_idx']}" 
+                    <a href="https://place.map.kakao.com/{row["diner_idx"]}" 
                        target="_blank" 
                        style="background-color: #FEE500; 
                               color: #000; 
@@ -109,12 +108,8 @@ class FoliumMapRenderer:
         """지도 렌더링 및 상호작용 처리"""
         # 지도 중심점 계산
         if len(df_restaurants) > 0:
-            center_lat = (
-                df_restaurants["diner_lat"].mean() + user_lat
-            ) / 2
-            center_lon = (
-                df_restaurants["diner_lon"].mean() + user_lon
-            ) / 2
+            center_lat = (df_restaurants["diner_lat"].mean() + user_lat) / 2
+            center_lon = (df_restaurants["diner_lon"].mean() + user_lon) / 2
         else:
             center_lat = user_lat
             center_lon = user_lon
@@ -139,4 +134,3 @@ class FoliumMapRenderer:
         )
 
         return map_data
-

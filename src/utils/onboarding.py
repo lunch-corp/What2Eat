@@ -1,25 +1,26 @@
 # utils/onboarding.py
 
+import asyncio
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import pandas as pd
 import streamlit as st
 from firebase_admin import firestore
 
 from utils.api import APIRequester
+from utils.api_client import get_yamyam_ops_client
 from utils.auth import get_current_user
-from utils.data_processing import get_filtered_data
 from utils.firebase_logger import get_firebase_logger
 from utils.similar_restaurants import SimilarRestaurantFetcher
 
 
 class OnboardingManager:
-    """온보딩 관련 로직을 관리하는 클래스"""
+    """온보딩 관련 로직을 관리하는 클래스 (API 기반)"""
 
     def __init__(self, app=None):
         self.logger = get_firebase_logger()
-        self.app = app
+        self.app = app  # 레거시 호환성
         # 유사 식당 fetcher 초기화
         if app and hasattr(app, "df_diner"):
             self.similar_fetcher = SimilarRestaurantFetcher()
@@ -27,14 +28,56 @@ class OnboardingManager:
             self.similar_fetcher = None
         self.api_requester = APIRequester(endpoint=st.secrets["API_URL"])
 
+    def _convert_api_response_to_restaurant(
+        self, row: dict[str, Any]
+    ) -> dict[str, Any]:
+        """API 응답을 온보딩용 음식점 형식으로 변환"""
+        # NaN 값 안전하게 처리
+        review_count = row.get("diner_review_cnt", 0)
+        if pd.isna(review_count):
+            review_count = 0
+        else:
+            review_count = int(review_count)
+
+        rating = row.get("diner_review_avg", 0)
+        if pd.isna(rating):
+            rating = 0.0
+        else:
+            rating = float(rating)
+
+        distance = row.get("distance_km", 0)
+        if pd.isna(distance):
+            distance = 0.0
+        else:
+            distance = round(float(distance), 1)
+
+        # diner_menu_name 처리
+        specialties = row.get("diner_menu_name", [])
+        if isinstance(specialties, str):
+            # 문자열인 경우 쉼표로 분리
+            specialties = [s.strip() for s in specialties.split(",") if s.strip()][:3]
+        elif isinstance(specialties, list):
+            specialties = specialties[:3]
+        else:
+            specialties = []
+
+        return {
+            "id": str(row.get("diner_idx", "")),
+            "name": row.get("diner_name", ""),
+            "category": row.get("diner_category_large", "카테고리 정보 없음"),
+            "diner_category_large": row.get("diner_category_large", ""),
+            "address": row.get("diner_num_address", "주소 정보 없음"),
+            "rating": rating,
+            "review_count": review_count,
+            "price_range": "정보 없음",
+            "specialties": specialties,
+            "distance": distance,
+        }
+
     def get_popular_restaurants_by_location(
         self, location: str, limit: int = 10
-    ) -> List[Dict[str, Any]]:
-        """위치 기반 인기 음식점 조회 (2km 반경, diner_grade 높은 순)"""
-        if not self.app or not hasattr(self.app, "df_diner"):
-            # app 인스턴스나 df_diner가 없는 경우 빈 리스트 반환
-            return []
-
+    ) -> list[dict[str, Any]]:
+        """위치 기반 인기 음식점 조회 (2km 반경, API 호출)"""
         # 현재 사용자 위치 정보 가져오기
         if "user_lat" not in st.session_state or "user_lon" not in st.session_state:
             return []
@@ -42,82 +85,44 @@ class OnboardingManager:
         user_lat = st.session_state.user_lat
         user_lon = st.session_state.user_lon
 
-        # 2km 반경 내 데이터 필터링
-        df_geo_filtered = get_filtered_data(
-            self.app.df_diner, user_lat, user_lon, max_radius=2
-        )
+        try:
+            # API 클라이언트 가져오기
+            client = get_yamyam_ops_client()
+            if not client:
+                return []
 
-        # diner_grade가 있는 데이터만 필터링
-        df_geo_filtered = df_geo_filtered[df_geo_filtered["diner_grade"].notna()]
+            # 비동기 API 호출을 동기적으로 실행
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            restaurants = loop.run_until_complete(
+                client.get_restaurants(
+                    user_lat=user_lat,
+                    user_lon=user_lon,
+                    radius_km=2.0,
+                    sort_by="popularity",
+                    limit=limit,
+                )
+            )
+            loop.close()
 
-        # diner_grade가 1 이상인 찐맛집만 필터링
-        df_quality = df_geo_filtered[df_geo_filtered["diner_grade"] >= 1]
+            if not restaurants:
+                return []
 
-        if len(df_quality) == 0:
+            # 응답 형식 변환
+            return [self._convert_api_response_to_restaurant(r) for r in restaurants]
+
+        except Exception as e:
+            print(f"인기 음식점 조회 실패: {e}")
             return []
-
-        # diner_grade 높은 순으로 정렬
-        df_sorted = df_quality.sort_values(by="diner_grade", ascending=False)
-
-        # limit 개수만큼 선택
-        df_selected = df_sorted.head(limit)
-
-        # 결과를 딕셔너리 리스트로 변환
-        restaurants = []
-        for _, row in df_selected.iterrows():
-            # NaN 값 안전하게 처리
-            review_count = row.get("diner_review_cnt", 0)
-            if pd.isna(review_count):
-                review_count = 0
-            else:
-                review_count = int(review_count)
-
-            rating = row.get("diner_review_avg", 0)
-            if pd.isna(rating):
-                rating = 0.0
-            else:
-                rating = float(rating)
-
-            distance = row.get("distance", 0)
-            if pd.isna(distance):
-                distance = 0.0
-            else:
-                distance = round(float(distance), 1)
-
-            # diner_menu_name 처리 - list 타입이면 문자열로 변환
-            specialties = row.get("diner_menu_name", [])
-            if isinstance(specialties, list):
-                specialties = specialties[:3]
-            else:
-                specialties = []
-
-            restaurant = {
-                "id": str(row.get("diner_idx", "")),
-                "name": row.get("diner_name", ""),
-                "category": row.get("diner_category_large", "카테고리 정보 없음"),
-                "diner_category_large": row.get("diner_category_large", ""),
-                "address": row.get("diner_num_address", f"{location} 근처"),
-                "rating": rating,
-                "review_count": review_count,
-                "price_range": "정보 없음",
-                "specialties": specialties,
-                "distance": distance,
-            }
-            restaurants.append(restaurant)
-
-        return restaurants
 
     def get_restaurants_by_preferred_categories(
         self,
         location: str,
-        preferred_categories: List[str],
+        preferred_categories: list[str],
         offset: int = 0,
         limit: int = 10,
-    ) -> List[Dict[str, Any]]:
-        """선호 카테고리 기반 음식점 조회 (페이징 지원)"""
-        if not self.app or not hasattr(self.app, "df_diner"):
-            return []
-
+    ) -> list[dict[str, Any]]:
+        """선호 카테고리 기반 음식점 조회 (페이징 지원, API 호출)"""
         # 현재 사용자 위치 정보 가져오기
         if "user_lat" not in st.session_state or "user_lon" not in st.session_state:
             return []
@@ -125,124 +130,57 @@ class OnboardingManager:
         user_lat = st.session_state.user_lat
         user_lon = st.session_state.user_lon
 
-        # 2km 반경 내 데이터 필터링
-        df_geo_filtered = get_filtered_data(
-            self.app.df_diner, user_lat, user_lon, max_radius=3
-        )
+        try:
+            # API 클라이언트 가져오기
+            client = get_yamyam_ops_client()
+            if not client:
+                return []
 
-        # diner_grade가 있는 데이터만 필터링
-        df_geo_filtered = df_geo_filtered[df_geo_filtered["diner_grade"].notna()]
+            # 비동기 API 호출을 동기적으로 실행
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            restaurants = loop.run_until_complete(
+                client.get_restaurants(
+                    user_lat=user_lat,
+                    user_lon=user_lon,
+                    radius_km=3.0,
+                    large_categories=preferred_categories,
+                    sort_by="popularity",
+                    limit=limit,
+                    offset=offset,
+                )
+            )
+            loop.close()
 
-        # diner_grade가 1 이상인 찐맛집만 필터링
-        df_quality = df_geo_filtered[df_geo_filtered["diner_grade"] >= 1]
+            if not restaurants:
+                return []
 
-        if len(df_quality) == 0:
+            # 응답 형식 변환
+            return [self._convert_api_response_to_restaurant(r) for r in restaurants]
+
+        except Exception as e:
+            print(f"선호 카테고리 기반 음식점 조회 실패: {e}")
             return []
-
-        # 선호 카테고리 기반 필터링 (우선순위: 선호 카테고리 > 기타)
-        preferred_restaurants = []
-        other_restaurants = []
-        df_quality = df_quality[df_quality["diner_category_large"].notna()]
-
-        for _, row in df_quality.iterrows():
-            restaurant_category = row.get("diner_category_large", "")
-
-            # NaN 값 안전하게 처리
-            review_count = row.get("diner_review_cnt", 0)
-            if pd.isna(review_count):
-                review_count = 0
-            else:
-                review_count = int(review_count)
-
-            rating = row.get("diner_review_avg", 0)
-            if pd.isna(rating):
-                rating = 0.0
-            else:
-                rating = float(rating)
-
-            distance = row.get("distance", 0)
-            if pd.isna(distance):
-                distance = 0.0
-            else:
-                distance = round(float(distance), 1)
-
-            diner_grade = row.get("diner_grade", 0)
-            if pd.isna(diner_grade):
-                diner_grade = 0.0
-            else:
-                diner_grade = float(diner_grade)
-
-            # diner_menu_name 처리 - list 타입이면 문자열로 변환
-            specialties = row.get("diner_menu_name", [])
-            if isinstance(specialties, list):
-                specialties = specialties[:3]
-            else:
-                specialties = []
-
-            restaurant = {
-                "id": str(row.get("diner_idx", "")),
-                "name": row.get("diner_name", ""),
-                "category": restaurant_category,
-                "diner_category_large": restaurant_category,
-                "address": row.get("diner_num_address", f"{location} 근처"),
-                "rating": rating,
-                "review_count": review_count,
-                "price_range": "정보 없음",
-                "specialties": specialties,
-                "distance": distance,
-                "diner_grade": diner_grade,
-                "is_preferred": restaurant_category in preferred_categories,
-            }
-
-            if restaurant_category in preferred_categories:
-                preferred_restaurants.append(restaurant)
-            else:
-                other_restaurants.append(restaurant)
-
-        # 선호 카테고리는 diner_grade 높은 순, 기타 카테고리도 diner_grade 높은 순 정렬
-        preferred_restaurants.sort(key=lambda x: x["diner_grade"], reverse=True)
-        other_restaurants.sort(key=lambda x: x["diner_grade"], reverse=True)
-
-        # 선호 카테고리를 먼저 배치하고, 그 다음 기타 카테고리 배치
-        all_restaurants = preferred_restaurants + other_restaurants
-
-        # 페이징 처리
-        end_idx = offset + limit
-        return all_restaurants[offset:end_idx]
 
     def get_total_restaurants_count(
-        self, location: str, preferred_categories: List[str] = None
+        self, location: str, preferred_categories: list[str] = None
     ) -> int:
-        """전체 음식점 개수 조회"""
-        if not self.app or not hasattr(self.app, "df_diner"):
-            return 0
+        """
+        전체 음식점 개수 조회 (API 기반에서는 정확한 개수를 알 수 없음)
 
-        # 현재 사용자 위치 정보 가져오기
-        if "user_lat" not in st.session_state or "user_lon" not in st.session_state:
-            return 0
-
-        user_lat = st.session_state.user_lat
-        user_lon = st.session_state.user_lon
-
-        # 2km 반경 내 데이터 필터링
-        df_geo_filtered = get_filtered_data(
-            self.app.df_diner, user_lat, user_lon, max_radius=2
-        )
-
-        # diner_grade가 있는 데이터만 필터링
-        df_geo_filtered = df_geo_filtered[df_geo_filtered["diner_grade"].notna()]
-
-        # diner_grade가 1 이상인 찐맛집만 필터링
-        df_quality = df_geo_filtered[df_geo_filtered["diner_grade"] >= 1]
-
-        return len(df_quality)
+        Note: API 기반으로 전환되면서 정확한 전체 개수를 알 수 없습니다.
+        대신 충분히 큰 숫자를 반환하여 "더 보기" 버튼이 계속 표시되도록 합니다.
+        """
+        # API 기반에서는 전체 개수를 정확히 알 수 없으므로
+        # 충분히 큰 숫자를 반환 (실제로는 페이지네이션으로 처리)
+        return 9999
 
     def get_similar_restaurants(
         self, restaurant_id: str, limit: int = 3, use_item_cf: bool = True
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         유사 음식점 조회
-        
+
         Args:
             restaurant_id: 기준 식당 ID
             limit: 반환할 최대 개수
@@ -250,17 +188,17 @@ class OnboardingManager:
         """
         if not self.similar_fetcher:
             return []
-        
+
         return self.similar_fetcher.get_similar_restaurants(
             diner_idx=int(restaurant_id),
             user_lat=st.session_state.get("user_lat"),
             user_lon=st.session_state.get("user_lon"),
             use_item_cf=use_item_cf,
-            limit=limit
+            limit=limit,
         )
 
     def save_user_profile(
-        self, profile_data: Dict[str, Any], ratings_data: Dict[str, int]
+        self, profile_data: dict[str, Any], ratings_data: dict[str, int]
     ) -> bool:
         """사용자 프로필 데이터를 users/{uid}/onboarding_logs 하위 컬렉션에 저장"""
         try:
@@ -313,7 +251,7 @@ class OnboardingManager:
             st.error(f"프로필 저장 중 오류: {str(e)}")
             return False
 
-    def load_user_profile(self) -> Optional[Dict[str, Any]]:
+    def load_user_profile(self) -> Optional[dict[str, Any]]:
         """users/{uid}/onboarding_logs 하위 컬렉션에서 사용자 프로필 데이터를 로드"""
         try:
             user_info = get_current_user()
@@ -348,8 +286,8 @@ class OnboardingManager:
 
     def update_user_profile(
         self,
-        profile_updates: Dict[str, Any] = None,
-        ratings_updates: Dict[str, int] = None,
+        profile_updates: dict[str, Any] = None,
+        ratings_updates: dict[str, int] = None,
     ) -> bool:
         """사용자 프로필 데이터를 부분적으로 업데이트"""
         try:
@@ -458,8 +396,8 @@ class OnboardingManager:
             return False
 
     def validate_onboarding_data(
-        self, profile_data: Dict[str, Any], ratings_data: Dict[str, int]
-    ) -> List[str]:
+        self, profile_data: dict[str, Any], ratings_data: dict[str, int]
+    ) -> list[str]:
         """온보딩 데이터 유효성 검사"""
         errors = []
 
@@ -480,138 +418,6 @@ class OnboardingManager:
             errors.append(f"최소 5개 음식점 평가가 필요합니다. (현재: {rated_count}개)")
 
         return errors
-
-    def get_recommendation_preview(
-        self, profile_data: Dict[str, Any], ratings_data: Dict[str, int]
-    ) -> List[Dict[str, Any]]:
-        """온보딩 데이터 기반 추천 미리보기 - 실제 데이터 활용"""
-        try:
-            if not self.app or not hasattr(self.app, "df_diner"):
-                return []
-
-            # 현재 사용자 위치 정보 확인
-            if "user_lat" not in st.session_state or "user_lon" not in st.session_state:
-                return []
-
-            user_lat = st.session_state.user_lat
-            user_lon = st.session_state.user_lon
-
-            # 2km 반경 내 데이터 필터링
-            df_geo_filtered = get_filtered_data(
-                self.app.df_diner, user_lat, user_lon, max_radius=100
-            )
-
-            # diner_grade가 있는 데이터만 필터링
-            df_geo_filtered = df_geo_filtered[df_geo_filtered["diner_grade"].notna()]
-
-            # diner_grade가 1 이상인 찐맛집만 필터링
-            df_quality = df_geo_filtered[df_geo_filtered["diner_grade"] >= 1]
-
-            if len(df_quality) == 0:
-                return []
-
-            # 온보딩 정보 분석
-            preferred_categories = profile_data.get(
-                "food_preferences_large", profile_data.get("food_preferences", [])
-            )
-            spice_level = profile_data.get("spice_level", 2)
-            budget = profile_data.get("regular_budget", "1-2만원")
-            age_group = self._get_age_group(profile_data.get("birth_year"))
-            gender = profile_data.get("gender", "기타")
-
-            # 사용자가 높게 평가한 음식점들의 카테고리 분석
-            high_rated_categories = self._analyze_rated_categories(ratings_data)
-
-            # 추천 로직 적용
-            recommendations = []
-
-            # 1. 선호 카테고리 기반 추천 (가중치 높음)
-            if preferred_categories:
-                pref_recs = self._get_category_based_recommendations(
-                    df_quality, preferred_categories, limit=2
-                )
-                for rec in pref_recs:
-                    rec["reason"] = (
-                        f"선호하시는 {rec['category']} 카테고리의 인기 맛집이에요! (평점 {rec['diner_grade']:.1f})"
-                    )
-                    rec["recommendation_type"] = "선호 카테고리"
-                recommendations.extend(pref_recs)
-
-            # 2. 평가 패턴 기반 추천
-            if high_rated_categories:
-                pattern_recs = self._get_pattern_based_recommendations(
-                    df_quality, high_rated_categories, preferred_categories, limit=2
-                )
-                for rec in pattern_recs:
-                    rec["reason"] = (
-                        f"평가하신 {rec['category']} 맛집들과 비슷한 스타일이에요! (평점 {rec['diner_grade']:.1f})"
-                    )
-                    rec["recommendation_type"] = "취향 분석"
-                recommendations.extend(pattern_recs)
-
-            # 3. 예산 고려 추천
-            budget_recs = self._get_budget_friendly_recommendations(
-                df_quality,
-                budget,
-                preferred_categories + high_rated_categories,
-                limit=1,
-            )
-            for rec in budget_recs:
-                rec["reason"] = (
-                    f"예산 {budget}에 맞는 가성비 좋은 맛집이에요! (평점 {rec['diner_grade']:.1f})"
-                )
-                rec["recommendation_type"] = "예산 맞춤"
-            recommendations.extend(budget_recs)
-
-            # 4. 매운맛 선호도 기반 추천
-            spice_recs = self._get_spice_level_recommendations(
-                df_quality,
-                spice_level,
-                preferred_categories + high_rated_categories,
-                limit=1,
-            )
-            for rec in spice_recs:
-                spice_desc = (
-                    "순한맛"
-                    if spice_level <= 2
-                    else "보통맛"
-                    if spice_level <= 3
-                    else "매운맛"
-                )
-                rec["reason"] = (
-                    f"매운맛 {spice_level}단 기준으로 {spice_desc} 좋아하실 것 같아요! (평점 {rec['diner_grade']:.1f})"
-                )
-                rec["recommendation_type"] = "매운맛 맞춤"
-            recommendations.extend(spice_recs)
-
-            # 5. 연령/성별 기반 인기 맛집 추천
-            demo_recs = self._get_demographic_recommendations(
-                df_quality,
-                age_group,
-                gender,
-                preferred_categories + high_rated_categories,
-                limit=1,
-            )
-            for rec in demo_recs:
-                rec["reason"] = (
-                    f"{age_group} {gender}분들이 많이 찾는 인기 맛집이에요! (평점 {rec['diner_grade']:.1f})"
-                )
-                rec["recommendation_type"] = "인기 맛집"
-            recommendations.extend(demo_recs)
-
-            # 중복 제거 및 최종 정리
-            unique_recommendations = self._remove_duplicates(recommendations)
-
-            # 최대 5개로 제한하고 다양성 확보
-            final_recommendations = self._ensure_diversity(
-                unique_recommendations, max_count=5
-            )
-
-            return final_recommendations
-
-        except Exception as e:
-            st.error(f"추천 미리보기 생성 중 오류: {str(e)}")
-            return []
 
     def _get_age_group(self, birth_year: int) -> str:
         """출생연도를 기반으로 연령대 반환"""
@@ -634,7 +440,7 @@ class OnboardingManager:
         else:
             return "60대 이상"
 
-    def _analyze_rated_categories(self, ratings_data: Dict[str, int]) -> List[str]:
+    def _analyze_rated_categories(self, ratings_data: dict[str, int]) -> list[str]:
         """사용자가 높게 평가한 음식점들의 카테고리 분석"""
         if not self.app or not hasattr(self.app, "df_diner"):
             return []
@@ -658,8 +464,8 @@ class OnboardingManager:
         return high_rated_categories
 
     def _get_category_based_recommendations(
-        self, df_quality: pd.DataFrame, preferred_categories: List[str], limit: int = 2
-    ) -> List[Dict[str, Any]]:
+        self, df_quality: pd.DataFrame, preferred_categories: list[str], limit: int = 2
+    ) -> list[dict[str, Any]]:
         """선호 카테고리 기반 추천"""
         category_recs = []
 
@@ -677,10 +483,10 @@ class OnboardingManager:
     def _get_pattern_based_recommendations(
         self,
         df_quality: pd.DataFrame,
-        high_rated_categories: List[str],
-        preferred_categories: List[str],
+        high_rated_categories: list[str],
+        preferred_categories: list[str],
         limit: int = 2,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """평가 패턴 기반 추천"""
         pattern_recs = []
 
@@ -703,9 +509,9 @@ class OnboardingManager:
         self,
         df_quality: pd.DataFrame,
         budget: str,
-        exclude_categories: List[str],
+        exclude_categories: list[str],
         limit: int = 1,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """예산 친화적 추천 (분식, 한식 등 가성비 좋은 카테고리 우선)"""
 
         # 예산에 따른 카테고리 우선순위 조정
@@ -731,9 +537,9 @@ class OnboardingManager:
         self,
         df_quality: pd.DataFrame,
         spice_level: int,
-        exclude_categories: List[str],
+        exclude_categories: list[str],
         limit: int = 1,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """매운맛 선호도 기반 추천"""
         if spice_level <= 2:  # 순한맛 선호
             mild_categories = ["일식", "양식", "디저트", "베이커리"]
@@ -758,9 +564,9 @@ class OnboardingManager:
         df_quality: pd.DataFrame,
         age_group: str,
         gender: str,
-        exclude_categories: List[str],
+        exclude_categories: list[str],
         limit: int = 1,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """연령/성별 기반 인기 맛집 추천"""
         # 전체적으로 인기 높은 카테고리에서 추천
         popular_categories = ["한식", "양식", "일식", "중식", "카페"]
@@ -796,7 +602,7 @@ class OnboardingManager:
 
     def _convert_to_recommendation_format(
         self, df_restaurants: pd.DataFrame
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """DataFrame을 추천 형식으로 변환"""
         recommendations = []
 
@@ -844,8 +650,8 @@ class OnboardingManager:
         return recommendations
 
     def _remove_duplicates(
-        self, recommendations: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
+        self, recommendations: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         """중복 음식점 제거"""
         seen_ids = set()
         unique_recs = []
@@ -858,8 +664,8 @@ class OnboardingManager:
         return unique_recs
 
     def _ensure_diversity(
-        self, recommendations: List[Dict[str, Any]], max_count: int = 5
-    ) -> List[Dict[str, Any]]:
+        self, recommendations: list[dict[str, Any]], max_count: int = 5
+    ) -> list[dict[str, Any]]:
         """추천 목록의 다양성 확보"""
         if len(recommendations) <= max_count:
             return recommendations
@@ -884,8 +690,8 @@ class OnboardingManager:
         return final_recs[:max_count]
 
     def analyze_user_taste_profile(
-        self, ratings_data: Dict[str, int]
-    ) -> Dict[str, Any]:
+        self, ratings_data: dict[str, int]
+    ) -> dict[str, Any]:
         """사용자 취향 프로필 분석"""
         analysis = {
             "total_ratings": len([r for r in ratings_data.values() if r > 0]),

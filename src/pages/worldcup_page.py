@@ -29,7 +29,6 @@ def render():
     # 앱 인스턴스 가져오기
     if "app" not in st.session_state:
         st.session_state.app = What2EatApp()
-    app = st.session_state.app
 
     # WorldCupManager 사용 (Redis 통합 버전)
     worldcup_manager = get_worldcup_manager()

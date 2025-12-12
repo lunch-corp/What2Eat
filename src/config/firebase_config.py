@@ -1,7 +1,7 @@
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import firebase_admin
 import streamlit as st
@@ -22,7 +22,7 @@ def get_service_account_path() -> Optional[str]:
     return str(default_path) if default_path.exists() else None
 
 
-def get_service_account_info() -> Optional[Dict[str, Any]]:
+def get_service_account_info() -> Optional[dict[str, Any]]:
     """
     Firebase Admin SDK 서비스 계정 정보를 반환합니다.
     우선순위: Streamlit secrets > 파일 > None
@@ -30,7 +30,6 @@ def get_service_account_info() -> Optional[Dict[str, Any]]:
     # Streamlit secrets에서 확인
     if hasattr(st, "secrets") and "FIREBASE_KEY" in st.secrets:
         firebase_key = json.loads(st.secrets["FIREBASE_KEY"])
-        st.write(firebase_key)
         return firebase_key
 
     # 서비스 계정 키 파일에서 확인
@@ -71,7 +70,7 @@ def initialize_firebase_admin() -> bool:
             return False
 
 
-def get_firebase_web_config() -> Dict[str, Any]:
+def get_firebase_web_config() -> dict[str, Any]:
     """
     Firebase Web SDK 설정 정보를 반환합니다. (Google 로그인용)
     우선순위: streamlit secrets > 환경변수 > 기본값

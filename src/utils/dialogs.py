@@ -5,6 +5,7 @@ import pydeck as pdk
 import streamlit as st
 from streamlit_geolocation import streamlit_geolocation
 
+from utils.activity_logger import get_activity_logger
 from utils.geolocation import (
     geocode,
     get_user_default_location,
@@ -114,6 +115,23 @@ def change_location():
                     st.session_state.user_lat,
                     st.session_state.user_lon,
                 )
+
+                # session_state에 location_method 저장
+                st.session_state.location_method = "geolocation"
+
+                # 활동 로그 기록
+                try:
+                    logger = get_activity_logger()
+                    logger.log_location_set(
+                        address=st.session_state.address,
+                        lat=st.session_state.user_lat,
+                        lon=st.session_state.user_lon,
+                        method="geolocation",
+                        page="search_filter",
+                    )
+                except Exception:
+                    # 로깅 실패해도 계속 진행
+                    pass
 
                 st.success("✅ 위치를 찾았습니다!")
                 st.rerun()

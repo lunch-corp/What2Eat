@@ -5,8 +5,7 @@ import streamlit as st
 
 from config.constants import GRADE_MAP
 from utils.app import What2EatApp
-from utils.data_processing import grade_to_stars
-from utils.dialogs import change_location, show_restaurant_map
+from utils.dialogs import change_location
 from utils.firebase_logger import get_firebase_logger
 
 
@@ -31,7 +30,6 @@ def render():
     # 앱 인스턴스 가져오기
     if "app" not in st.session_state:
         st.session_state.app = What2EatApp()
-    app = st.session_state.app
 
     st.title("지역별 카테고리 랭킹")
 
@@ -54,161 +52,253 @@ def render():
     )
     selected_grade_values = [GRADE_MAP[grade] for grade in selected_grades]
 
-    # 지역 선택
-    app.df_diner[["city", "region"]] = (
-        app.df_diner["diner_num_address"].str.split(" ", n=2, expand=True).iloc[:, :2]
+    # 지역 선택 (간소화 - API 기반으로 변경)
+    st.info(
+        "💡 랭킹 페이지는 현재 위치 기반으로 조회됩니다. API 기반으로 업데이트되었습니다."
     )
 
-    ZONE_LIST = list(app.df_diner["city"].unique())
-    zone = st.selectbox("지역을 선택하세요", ZONE_LIST, index=0)
-    selected_zone_all = f"{zone} 전체"
+    # 현재 위치 정보 가져오기
+    if "user_lat" not in st.session_state or "user_lon" not in st.session_state:
+        st.warning("⚠️ 위치 정보가 없습니다. 위치를 설정해주세요.")
+        change_location()
+        return
 
-    # 선택한 지역의 데이터 필터링
-    filtered_zone_df = app.df_diner[app.df_diner["city"] == zone]
+    user_lat = st.session_state.user_lat
+    user_lon = st.session_state.user_lon
 
-    # 상세 지역 선택
-    city_options = list(filtered_zone_df["region"].dropna().unique())
-    city_label = st.selectbox("상세 지역을 선택하세요", [selected_zone_all] + city_options)
+    # 카테고리 선택
+    from utils.category_manager import get_category_manager
 
-    if city_label:
-        filtered_zone_df["diner_category_large"] = filtered_zone_df[
-            "diner_category_large"
-        ].fillna("기타")
-        if city_label == selected_zone_all:
-            filtered_city_df = filtered_zone_df
-        else:
-            filtered_city_df = filtered_zone_df[filtered_zone_df["region"] == city_label]
+    category_manager = get_category_manager()
+    large_categories = category_manager.get_large_categories()
 
-        # 중간 카테고리 선택 및 필터링
-        available_categories = filtered_city_df["diner_category_large"].unique()
-        selected_category = st.selectbox(
-            "중간 카테고리를 선택하세요", ["전체"] + list(available_categories)
-        )
+    category_names = ["전체"] + [cat["name"] for cat in large_categories]
+    selected_category = st.selectbox("카테고리를 선택하세요", category_names)
 
-        if selected_category != "전체":
-            filtered_city_df = filtered_city_df[
-                filtered_city_df["diner_category_large"] == selected_category
-            ]
-            _log_user_activity(
-                "category_filter",
-                {
-                    "category": selected_category,
-                    "location": city_label,
-                    "from_page": "ranking",
-                },
+    # 중분류 카테고리 선택
+    selected_small_category = "전체"
+    if selected_category != "전체":
+        middle_categories = category_manager.get_middle_categories(selected_category)
+        if middle_categories:
+            middle_names = ["전체"] + [cat["name"] for cat in middle_categories]
+            selected_small_category = st.selectbox(
+                "세부 카테고리를 선택하세요", middle_names
             )
 
-        # 세부 카테고리 선택 및 필터링
-        available_small_categories = (
-            filtered_city_df["diner_category_middle"].fillna("기타").unique()
-        )
-        selected_small_category = st.selectbox(
-            "세부 카테고리를 선택하세요", ["전체"] + list(available_small_categories)
-        )
-
-        if selected_small_category != "전체":
-            filtered_city_df = filtered_city_df[
-                filtered_city_df["diner_category_middle"] == selected_small_category
-            ]
-
-        # 쩝슐랭 등급 필터링
-        filtered_city_df = filtered_city_df[
-            filtered_city_df["diner_grade"].isin(selected_grade_values)
-        ]
-
-        # 랭킹 조회 로그
         _log_user_activity(
-            "ranking_view",
+            "category_filter",
             {
-                "location": city_label,
                 "category": selected_category,
-                "small_category": selected_small_category,
-                "grades": selected_grades,
-                "results_count": len(filtered_city_df),
+                "from_page": "ranking",
             },
         )
 
-        # 세부 카테고리별 랭킹 표시
-        st.subheader(
-            f"{selected_category if selected_category != '전체' else '전체 중간 카테고리'} 카테고리 ({selected_small_category if selected_small_category != '전체' else '전체'}) 랭킹"
-        )
+    # API를 통해 음식점 데이터 가져오기
+    import asyncio
 
-        # 복사본을 만들고 fillna 적용
-        filtered_city_df_copy = filtered_city_df.copy()
+    import pandas as pd
+
+    from utils.api_client import get_yamyam_ops_client
+
+    try:
+        client = get_yamyam_ops_client()
+        if not client:
+            st.error("❌ API 클라이언트를 초기화할 수 없습니다.")
+            return
+
+        # 비동기 API 호출
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        restaurants = loop.run_until_complete(
+            client.get_restaurants(
+                user_lat=user_lat,
+                user_lon=user_lon,
+                radius_km=10.0,  # 10km 반경
+                large_categories=[selected_category]
+                if selected_category != "전체"
+                else None,
+                middle_categories=[selected_small_category]
+                if selected_small_category != "전체"
+                else None,
+                sort_by="rating",
+                limit=100,
+            )
+        )
+        loop.close()
+
+        if not restaurants:
+            st.warning("⚠️ 조건에 맞는 음식점이 없습니다.")
+            return
+
+        filtered_city_df = pd.DataFrame(restaurants)
+
+        # 등급 필터링 (API 응답에 diner_grade가 있는 경우)
+        if "diner_grade" in filtered_city_df.columns:
+            filtered_city_df = filtered_city_df[
+                filtered_city_df["diner_grade"].isin(selected_grade_values)
+            ]
+
+    except Exception as e:
+        st.error(f"❌ 음식점 조회 중 오류가 발생했습니다: {str(e)}")
+        return
+
+    # 활동 로그 기록
+    try:
+        from utils.activity_logger import get_activity_logger
+
+        logger = get_activity_logger()
+        logger.log_ranking_view(
+            city=None,
+            region=None,
+            grades=selected_grades,
+            large_category=selected_category if selected_category != "전체" else None,
+            middle_category=selected_small_category
+            if selected_small_category != "전체"
+            else None,
+        )
+    except Exception:
+        # 로깅 실패해도 계속 진행
+        pass
+
+    # 랭킹 조회 로그
+    _log_user_activity(
+        "ranking_view",
+        {
+            "category": selected_category,
+            "small_category": selected_small_category,
+            "grades": selected_grades,
+            "results_count": len(filtered_city_df),
+        },
+    )
+
+    # 세부 카테고리별 랭킹 표시
+    st.subheader(
+        f"{selected_category if selected_category != '전체' else '전체'} 카테고리 ({selected_small_category if selected_small_category != '전체' else '전체'}) 랭킹"
+    )
+
+    # 복사본을 만들고 fillna 적용
+    filtered_city_df_copy = filtered_city_df.copy()
+    if "diner_category_middle" in filtered_city_df_copy.columns:
         filtered_city_df_copy["diner_category_middle"] = filtered_city_df_copy[
             "diner_category_middle"
-        ].fillna(filtered_city_df_copy["diner_category_large"])
+        ].fillna(filtered_city_df_copy.get("diner_category_large", "기타"))
 
-        ranked_df = filtered_city_df_copy.sort_values(by="bayesian_score", ascending=False)[
-            [
-                "diner_name",
-                "diner_url",
-                "diner_category_middle",
-                "diner_grade",
-                "diner_lat",
-                "diner_lon",
-                "diner_menu_name",
-                "diner_tag",
-                "diner_num_address",
-                "region",
-            ]
+    # 필요한 컬럼만 선택 (API 응답에 있는 컬럼만)
+    available_columns = filtered_city_df_copy.columns.tolist()
+    display_columns = []
+    for col in [
+        "diner_name",
+        "diner_url",
+        "diner_category_middle",
+        "diner_grade",
+        "diner_review_cnt",
+        "diner_menu_name",
+        "diner_tag",
+        "diner_num_address",
+    ]:
+        if col in available_columns:
+            display_columns.append(col)
+
+    # 정렬 (bayesian_score가 있으면 사용, 없으면 diner_review_avg 사용)
+    sort_column = (
+        "bayesian_score"
+        if "bayesian_score" in available_columns
+        else "diner_review_avg"
+    )
+    if sort_column in available_columns:
+        ranked_df = filtered_city_df_copy.sort_values(by=sort_column, ascending=False)[
+            display_columns
         ]
+    else:
+        ranked_df = filtered_city_df_copy[display_columns]
 
-        if not ranked_df.empty:
-            # 지도 다이얼로그를 위한 상태 추가
-            if "show_map" not in st.session_state:
-                st.session_state.show_map = False
-            if "selected_restaurant" not in st.session_state:
-                st.session_state.selected_restaurant = None
+    if not ranked_df.empty:
+        # 지도 다이얼로그를 위한 상태 추가
+        if "show_map" not in st.session_state:
+            st.session_state.show_map = False
+        if "selected_restaurant" not in st.session_state:
+            st.session_state.selected_restaurant = None
+            ranked_df_100 = ranked_df[:100].reset_index(drop=True)
+            ranked_df_100["순위"] = ranked_df_100.index + 1
 
-            # 음식점 목록을 카드 형태로 표시
-            ranked_df = ranked_df[:100]
-            for _, row in ranked_df.iterrows():
-                with st.container():
-                    col1, col2, col3 = st.columns([1, 2, 1])
-                    with col1:
-                        st.write(grade_to_stars(row["diner_grade"]))
-                    with col2:
-                        # 음식점 링크 클릭 로그
-                        if st.button(
-                            f"**{row['diner_name']}** | {row['diner_category_middle']} | {row['region']}",
-                            key=f"link_{row['diner_name']}",
-                        ):
-                            # 강화된 음식점 클릭 로깅
-                            logger = get_firebase_logger()
-                            if "user_info" in st.session_state and st.session_state.user_info:
-                                uid = st.session_state.user_info.get("localId")
-                                if uid:
-                                    logger.log_restaurant_click(
-                                        uid=uid,
-                                        restaurant_name=row["diner_name"],
-                                        restaurant_url=row["diner_url"],
-                                        restaurant_idx=str(row.get("diner_idx", "")),
-                                        category=row["diner_category_middle"],
-                                        location=row["region"],
-                                        grade=row.get("diner_grade"),
-                                        review_count=row.get("diner_review_cnt"),
-                                        distance=row.get("distance"),
-                                        from_page="ranking",
-                                    )
-                            st.link_button("음식점 보기", row["diner_url"])
-                    with col3:
-                        if st.button("상세정보", key=f"map_{row['diner_name']}"):
-                            st.session_state.show_map = True
-                            st.session_state.selected_restaurant = row
-                            # 상세정보 조회 로그
-                            logger = get_firebase_logger()
-                            if "user_info" in st.session_state and st.session_state.user_info:
-                                uid = st.session_state.user_info.get("localId")
-                                if uid:
-                                    logger.log_restaurant_detail_view(
-                                        uid=uid,
-                                        restaurant_name=row["diner_name"],
-                                        restaurant_idx=str(row.get("diner_idx", "")),
-                                        from_page="ranking",
-                                    )
-                            show_restaurant_map(st.session_state.selected_restaurant)
+            # diner_idx를 먼저 저장 (rename 전)
+            if "diner_idx" in ranked_df_100.columns:
+                ranked_df_100["원본_diner_idx"] = ranked_df_100["diner_idx"]
+
+            ranked_df_100.rename(
+                columns={
+                    "diner_grade": "등급",
+                    "diner_name": "음식점명",
+                    "diner_url": "링크",
+                    "diner_category_middle": "카테고리",
+                    "diner_menu_name": "메뉴",
+                    "diner_tag": "태그",
+                    "diner_num_address": "주소",
+                    "region": "지역",
+                    "diner_review_cnt": "리뷰수",
+                    "distance": "거리(km)",
+                },
+                inplace=True,
+            )
+
+            # 각 음식점을 개별 행으로 렌더링하여 클릭 감지 가능하게 만들기
+            import re
+
+            import pandas as pd
+
+            from utils.activity_logger import get_activity_logger
+
+            for list_idx, (df_idx, row) in enumerate(ranked_df_100.iterrows()):
+                # diner_idx 추출
+                diner_idx = str(row.get("원본_diner_idx", ""))
+                if not diner_idx and "링크" in row:
+                    # 링크에서 diner_idx 추출
+                    match = re.search(r"/(\d+)$", str(row["링크"]))
+                    if match:
+                        diner_idx = match.group(1)
+
+                diner_name = row["음식점명"]
+                diner_url = row.get("링크", f"https://place.map.kakao.com/{diner_idx}")
+
+                col1, col2, col3, col4, col5, col6, col7 = st.columns(
+                    [0.5, 3, 2, 1, 1, 1, 1]
+                )
+
+                with col1:
+                    st.write(f"**{int(row['순위'])}**")
+                with col2:
+                    st.write(f"**{diner_name}**")
+                with col3:
+                    st.write(row["카테고리"])
+                with col4:
+                    st.write(
+                        "⭐" * int(row["등급"])
+                        if pd.notna(row["등급"]) and row["등급"]
+                        else ""
+                    )
+                with col5:
+                    st.write(int(row["리뷰수"]) if pd.notna(row["리뷰수"]) else 0)
+                with col6:
+                    if pd.notna(row.get("거리(km)")):
+                        st.write(f"{row['거리(km)']:.1f}km")
+                    else:
+                        st.write("-")
+                with col7:
+                    # 직접 링크도 제공 (백업)
+                    st.link_button("보기", diner_url)
+                    # 활동 로그 기록
+                    try:
+                        logger = get_activity_logger()
+                        logger.log_diner_click(
+                            diner_idx=diner_idx,
+                            diner_name=diner_name,
+                            position=int(row["순위"]),
+                            page="ranking",
+                        )
+                    except Exception:
+                        # 로깅 실패해도 계속 진행
+                        pass
+                if list_idx < len(ranked_df_100) - 1:
                     st.divider()
-        else:
-            st.warning("해당 조건의 랭킹 데이터가 없습니다.")
 
+            st.divider()

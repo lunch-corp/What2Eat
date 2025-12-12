@@ -5,10 +5,11 @@ import string
 
 import requests
 import streamlit as st
-from config.constants import DEFAULT_ADDRESS_INFO_LIST, KAKAO_API_HEADERS, KAKAO_API_URL
 from geopy.exc import GeocoderUnavailable
 from geopy.geocoders import Nominatim
 
+from config.constants import DEFAULT_ADDRESS_INFO_LIST, KAKAO_API_HEADERS, KAKAO_API_URL
+from utils.activity_logger import get_activity_logger
 from utils.auth import get_current_user
 from utils.firebase_logger import get_firebase_logger
 
@@ -134,6 +135,33 @@ def search_your_address():
                     st.session_state.user_lat,
                     st.session_state.user_lon,
                 )
+
+                # session_state에 location_method 저장
+                st.session_state.location_method = "search"
+
+                # 활동 로그 기록
+                try:
+                    logger = get_activity_logger()
+                    # 위치 검색 로그
+                    logger.log_location_search(
+                        query=search_region_text,
+                        lat=st.session_state.user_lat,
+                        lon=st.session_state.user_lon,
+                        address=st.session_state.address,
+                        method="search",
+                        page="search_filter",
+                    )
+                    # 위치 설정 완료 로그
+                    logger.log_location_set(
+                        address=st.session_state.address,
+                        lat=st.session_state.user_lat,
+                        lon=st.session_state.user_lon,
+                        method="search",
+                        page="search_filter",
+                    )
+                except Exception:
+                    # 로깅 실패해도 계속 진행
+                    pass
 
                 st.rerun()
             else:

@@ -6,7 +6,6 @@ from datetime import datetime
 import streamlit as st
 
 from utils.auth import get_current_user, get_user_ratings_summary
-from utils.firebase_logger import get_firebase_logger
 from utils.my_page_helpers import get_restaurant_history
 
 
@@ -157,7 +156,9 @@ def render():
                             st.divider()
 
                 if len(filtered_restaurants) > 20:
-                    st.info(f"💡 {len(filtered_restaurants) - 20}개 음식점이 더 있습니다.")
+                    st.info(
+                        f"💡 {len(filtered_restaurants) - 20}개 음식점이 더 있습니다."
+                    )
 
             else:
                 st.info("📝 아직 평가한 음식점이 없습니다.")
@@ -218,10 +219,11 @@ def render():
 
                         # 음식점 URL이 있으면 버튼 표시
                         if restaurant.get("url"):
-                            st.link_button("🔗", restaurant["url"], use_container_width=True)
+                            st.link_button(
+                                "🔗", restaurant["url"], use_container_width=True
+                            )
 
                     if i < len(restaurant_history) - 1:
                         st.divider()
         else:
             st.info("🍽️ 아직 클릭한 음식점이 없습니다. 맛집을 찾아보세요!")
-

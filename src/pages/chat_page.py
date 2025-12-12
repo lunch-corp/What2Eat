@@ -99,11 +99,9 @@ def render():
             )
             return
 
-        df_geo_filtered = df_quality
-
-        if len(df_geo_filtered):
-            df_geo_filtered_radius = df_geo_filtered[
-                df_geo_filtered["distance"] <= radius_kilometers
+        if len(df_quality):
+            df_geo_filtered_radius = df_quality[
+                df_quality["distance"] <= radius_kilometers
             ]
             st.session_state.df_filtered = df_geo_filtered_radius[
                 df_geo_filtered_radius["bayesian_score"].notna()
@@ -129,7 +127,9 @@ def render():
                 with radius_col1:
                     if st.button("다음 단계로", use_container_width=True):
                         st.session_state.chat_step = "search_method"
-                        _log_user_activity("chat_step_progress", {"step": "search_method"})
+                        _log_user_activity(
+                            "chat_step_progress", {"step": "search_method"}
+                        )
                         st.rerun()
             else:
                 my_chat_message(
@@ -212,7 +212,8 @@ def render():
                 user_profile = onboarding_manager.load_user_profile()
                 if user_profile:
                     preferred_categories = user_profile.get(
-                        "food_preferences_large", user_profile.get("food_preferences", [])
+                        "food_preferences_large",
+                        user_profile.get("food_preferences", []),
                     )
                     default_categories = [
                         cat
@@ -239,7 +240,9 @@ def render():
                         diner_category, st.session_state.df_filtered
                     )
                     if len(df_geo_mid_category_filtered):
-                        my_chat_message("세부 업종에서 안 당기는 건 빼!", avatar_style, seed)
+                        my_chat_message(
+                            "세부 업종에서 안 당기는 건 빼!", avatar_style, seed
+                        )
                         unique_categories = (
                             df_geo_mid_category_filtered["diner_category_middle"]
                             .unique()
@@ -251,18 +254,22 @@ def render():
                             default=unique_categories,
                         )
                         if selected_category:
-                            df_geo_small_category_filtered = df_geo_mid_category_filtered[
-                                df_geo_mid_category_filtered["diner_category_middle"].isin(
-                                    selected_category
-                                )
-                            ].sort_values(by="bayesian_score", ascending=False)
+                            df_geo_small_category_filtered = (
+                                df_geo_mid_category_filtered[
+                                    df_geo_mid_category_filtered[
+                                        "diner_category_middle"
+                                    ].isin(selected_category)
+                                ].sort_values(by="bayesian_score", ascending=False)
+                            )
                             _log_user_activity(
                                 "search_results",
                                 {
                                     "search_type": "category",
                                     "large_categories": diner_category,
                                     "small_categories": selected_category,
-                                    "results_count": len(df_geo_small_category_filtered),
+                                    "results_count": len(
+                                        df_geo_small_category_filtered
+                                    ),
                                 },
                             )
                             display_results(
@@ -274,10 +281,14 @@ def render():
                             )
             else:
                 my_chat_message(
-                    "헉.. 주변에 찐맛집이 없대.. \n 다른 메뉴를 골라봐", avatar_style, seed
+                    "헉.. 주변에 찐맛집이 없대.. \n 다른 메뉴를 골라봐",
+                    avatar_style,
+                    seed,
                 )
     else:
-        my_chat_message("헉.. 주변에 맛집이 없대.. \n 다른 위치를 찾아봐", avatar_style, seed)
+        my_chat_message(
+            "헉.. 주변에 맛집이 없대.. \n 다른 위치를 찾아봐", avatar_style, seed
+        )
 
     # 검색 초기화 버튼
     if st.session_state.chat_step not in ["greeting", "select_radius", "search_method"]:
@@ -285,4 +296,3 @@ def render():
             st.session_state.chat_step = "greeting"
             _log_user_activity("search_reset", {"from_page": "chat"})
             st.rerun()
-

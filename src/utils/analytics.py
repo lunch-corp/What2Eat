@@ -1,6 +1,7 @@
 # src/utils/analytics.py
 
 import streamlit.components.v1 as components
+
 from config.constants import GOOGLE_ANALYTIC_ID, MICROSOFT_CLARITY_ID
 
 
