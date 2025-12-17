@@ -671,6 +671,8 @@ def render():
                 df_results = search_filter.sort_restaurants(
                     diner_ids=diner_ids,
                     sort_by=filters["sort_by"],
+                    user_lat=st.session_state.user_lat,
+                    user_lon=st.session_state.user_lon,
                     limit=15,
                     offset=0,
                 )
