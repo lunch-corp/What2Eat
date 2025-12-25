@@ -323,6 +323,7 @@ class YamYamOpsClient:
         radius_km: float,
         large_categories: Optional[list[str]] = None,
         middle_categories: Optional[list[str]] = None,
+        min_review_count: Optional[int] = None,
         limit: Optional[int] = None,
     ) -> tuple[list[str], list[int], dict[str, float]]:
         """
@@ -334,6 +335,7 @@ class YamYamOpsClient:
             radius_km: 검색 반경 (km)
             large_categories: 대분류 카테고리 리스트
             middle_categories: 중분류 카테고리 리스트
+            min_review_count: 최소 리뷰 개수
             limit: 최대 결과 수
 
         Returns:
@@ -355,15 +357,18 @@ class YamYamOpsClient:
             if middle_categories and len(middle_categories) > 0:
                 params["diner_category_middle"] = middle_categories
 
+            if min_review_count is not None:
+                params["min_review_count"] = min_review_count
+
             if limit is not None:
                 params["limit"] = limit
 
             result = await self._make_request(
                 "GET", "/kakao/diners/filtered", params=params
             )
-
+            
             if not result:
-                return ([], [], {})
+                return ([], [], {}, {})
 
             # diner_ids 리스트와 거리 딕셔너리 추출
             diner_ids = [item["id"] for item in result]
@@ -377,7 +382,7 @@ class YamYamOpsClient:
 
         except Exception as e:
             logger.error(f"음식점 필터링 중 예외 발생: {e}")
-            return ([], [], {})
+            return ([], [], {}, {})
 
     async def sort_restaurants(
         self,

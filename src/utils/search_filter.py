@@ -37,6 +37,7 @@ class SearchFilter:
         radius_km: float,
         large_categories: Optional[list[str]],
         middle_categories: Optional[list[str]],
+        min_review_count: Optional[int] = None,
     ) -> int:
         """필터 조건의 해시값 생성"""
         key_parts = [
@@ -45,6 +46,7 @@ class SearchFilter:
             f"radius:{radius_km:.1f}",
             f"large:{sorted(large_categories) if large_categories else []}",
             f"middle:{sorted(middle_categories) if middle_categories else []}",
+            f"min_review:{min_review_count if min_review_count else 0}",
         ]
         return hash(tuple(key_parts))
 
@@ -55,6 +57,7 @@ class SearchFilter:
         radius_km: float,
         large_categories: Optional[list[str]] = None,
         middle_categories: Optional[list[str]] = None,
+        min_review_count: Optional[int] = None,
         limit: Optional[int] = None,
     ) -> tuple[Optional[list[str]], Optional[list[int]], Optional[dict[str, float]]]:
         """
@@ -66,6 +69,7 @@ class SearchFilter:
             radius_km: 검색 반경 (km)
             large_categories: 대분류 카테고리 리스트
             middle_categories: 중분류 카테고리 리스트
+            min_review_count: 최소 리뷰 개수
             limit: 최대 결과 수
 
         Returns:
@@ -90,6 +94,7 @@ class SearchFilter:
                         radius_km=radius_km,
                         large_categories=large_categories,
                         middle_categories=middle_categories,
+                        min_review_count=min_review_count,
                         limit=limit,
                     )
                 )
@@ -100,7 +105,7 @@ class SearchFilter:
 
         except Exception as e:
             st.error(f"❌ 음식점 필터링 중 오류가 발생했습니다: {str(e)}")
-            return None, None, None
+            return None, None, None, None
 
     def sort_restaurants(
         self,
