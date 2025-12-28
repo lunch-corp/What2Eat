@@ -71,104 +71,61 @@ def render_filter_ui(app: What2EatApp, search_filter: SearchFilter):
 
     st.markdown("---")
 
-    # # 카테고리 선택 (폼 외부 - 동적 업데이트를 위해)
-    # st.markdown("### 🍽️ 카테고리")
+    # 카테고리 선택 (폼 외부 - 동적 업데이트를 위해)
+    # 반경 설정
+    radius_km = st.slider(
+        "검색 반경 (km)",
+        min_value=0.3,
+        max_value=50.0,
+        value=st.session_state.search_filters["radius_km"],
+        step=0.3,
+    )
 
-    # # 대분류 카테고리
-    # large_categories = [cat for cat in LARGE_CATEGORIES if cat not in LARGE_CATEGORIES_NOT_USED]
-    # selected_large = st.multiselect(
-    #     "대분류 카테고리",
-    #     options=large_categories,
-    #     default=st.session_state.search_filters["large_categories"],
-    #     help="대분류를 선택하면 해당하는 중분류만 표시됩니다",
-    #     key="large_category_filter"
-    # )
+    # 카테고리 선택
+    st.markdown("### 🍽️ 카테고리")
 
-    # # 중분류 카테고리 (대분류 선택에 따라 동적으로 필터링)
-    # if selected_large:
-    #     df_filtered_by_large = app.df_diner[
-    #         app.df_diner["diner_category_large"].isin(selected_large)
-    #     ]
-    #     middle_categories = sorted(
-    #         df_filtered_by_large["diner_category_middle"].dropna().unique()
-    #     )
+    # 대분류 카테고리 (API에서 가져오기)
+    from utils.category_manager import get_category_manager
 
-    #     # 이전에 선택된 중분류 중 현재 대분류에 해당하는 것만 유지
-    #     valid_middle_defaults = [
-    #         cat
-    #         for cat in st.session_state.search_filters["middle_categories"]
-    #         if cat in middle_categories
-    #     ]
+    category_manager = get_category_manager()
+    large_categories_data = category_manager.get_large_categories()
+    large_categories = [cat["name"] for cat in large_categories_data]
 
-    #     selected_middle = st.multiselect(
-    #         "중분류 카테고리",
-    #         options=middle_categories,
-    #         default=valid_middle_defaults,
-    #         help=f"{len(middle_categories)}개의 중분류 카테고리 사용 가능",
-    #         key="middle_category_filter"
-    #     )
-    # else:
-    #     # 대분류가 선택되지 않은 경우 빈 목록 표시
-    #     selected_middle = st.multiselect(
-    #         "중분류 카테고리",
-    #         options=[],
-    #         default=[],
-    #         disabled=True,
-    #         help="먼저 대분류 카테고리를 선택해주세요",
-    #         key="middle_category_filter"
-    #     )
+    selected_large = st.multiselect(
+        "대분류 카테고리",
+        options=large_categories,
+        default=st.session_state.search_filters["large_categories"],
+    )
 
-    # st.markdown("---")
+    # 중분류 카테고리 (대분류 선택 시 활성화)
+    if selected_large:
+        # 선택된 대분류 카테고리별로 중분류 가져오기
+        all_middle = []
+        for large_cat in selected_large:
+            middle_data = category_manager.get_middle_categories(large_cat)
+            all_middle.extend([cat["name"] for cat in middle_data])
+        middle_categories = sorted(list(set(all_middle)))  # 중복 제거
 
-    # 폼으로 나머지 필터 감싸기
+        selected_middle = st.multiselect(
+            "중분류 카테고리",
+            options=middle_categories,
+            default=[
+                cat
+                for cat in st.session_state.search_filters["middle_categories"]
+                if cat in middle_categories
+            ],
+        )
+    else:
+        selected_middle = st.multiselect(
+            "중분류 카테고리",
+            options=[],
+            default=[],
+            disabled=True,
+            help="먼저 대분류 카테고리를 선택해주세요",
+            key="middle_category_filter"
+        )
+
     with st.form("search_filter_form", clear_on_submit=False):
-        # 반경 설정
-        radius_km = st.slider(
-            "검색 반경 (km)",
-            min_value=0.3,
-            max_value=50.0,
-            value=st.session_state.search_filters["radius_km"],
-            step=0.3,
-        )
-
-        # 카테고리 선택
-        st.markdown("### 🍽️ 카테고리")
-
-        # 대분류 카테고리 (API에서 가져오기)
-        from utils.category_manager import get_category_manager
-
-        category_manager = get_category_manager()
-        large_categories_data = category_manager.get_large_categories()
-        large_categories = [cat["name"] for cat in large_categories_data]
-
-        selected_large = st.multiselect(
-            "대분류 카테고리",
-            options=large_categories,
-            default=st.session_state.search_filters["large_categories"],
-        )
-
-        # 중분류 카테고리 (대분류 선택 시 활성화)
-        middle_categories = []
-        if selected_large:
-            # 선택된 대분류 카테고리별로 중분류 가져오기
-            all_middle = []
-            for large_cat in selected_large:
-                middle_data = category_manager.get_middle_categories(large_cat)
-                all_middle.extend([cat["name"] for cat in middle_data])
-            middle_categories = sorted(list(set(all_middle)))  # 중복 제거
-
-            selected_middle = st.multiselect(
-                "중분류 카테고리",
-                options=middle_categories,
-                default=[
-                    cat
-                    for cat in st.session_state.search_filters["middle_categories"]
-                    if cat in middle_categories
-                ],
-            )
-        else:
-            selected_middle = []
-
         # 정렬 기준
         st.markdown("### 📊 정렬 기준")
 
