@@ -35,9 +35,11 @@ def initialize_session_state():
     if "search_filters" not in st.session_state:
         st.session_state.search_filters = {
             "radius_km": 5.0,
+            "use_distance_limit": True,
             "large_categories": [],
             "middle_categories": [],
             "sort_by": "개인화",
+            "min_review_count": None,
         }
     if "filtered_restaurant_ids" not in st.session_state:
         st.session_state.filtered_restaurant_ids = []
@@ -51,6 +53,22 @@ def initialize_session_state():
         st.session_state.filtered_distance_id_mapping = {}
     if "filtered_distance_id_mapping_all" not in st.session_state:
         st.session_state.filtered_distance_id_mapping_all = {}  # 30km 범위의 전체 거리 데이터
+    
+    # 폼 위젯 key 초기화 (위젯 상태 동기화를 위해)
+    if "filter_radius_km" not in st.session_state:
+        st.session_state.filter_radius_km = st.session_state.search_filters["radius_km"]
+    if "filter_use_distance_limit" not in st.session_state:
+        # use_distance_limit가 True면 체크박스는 False (체크 해제), False면 체크박스는 True (체크)
+        use_distance_limit = st.session_state.search_filters["use_distance_limit"]
+        st.session_state.filter_use_distance_limit = not use_distance_limit
+    if "filter_min_review_count" not in st.session_state:
+        st.session_state.filter_min_review_count = st.session_state.search_filters["min_review_count"] if st.session_state.search_filters["min_review_count"] is not None else 0
+    if "filter_large_categories" not in st.session_state:
+        st.session_state.filter_large_categories = st.session_state.search_filters["large_categories"]
+    if "filter_middle_categories" not in st.session_state:
+        st.session_state.filter_middle_categories = st.session_state.search_filters["middle_categories"]
+    if "filter_sort_by" not in st.session_state:
+        st.session_state.filter_sort_by = st.session_state.search_filters["sort_by"]
 
 
 def render_filter_ui(app: What2EatApp, search_filter: SearchFilter):
@@ -146,12 +164,19 @@ def render_filter_ui(app: What2EatApp, search_filter: SearchFilter):
         if current_sort not in sort_options:
             current_sort = sort_options[0]
             st.session_state.search_filters["sort_by"] = current_sort
+        
+        # filter_sort_by key도 검증하고 업데이트 (위젯 key와 동기화)
+        if "filter_sort_by" in st.session_state:
+            if st.session_state.filter_sort_by not in sort_options:
+                st.session_state.filter_sort_by = current_sort
+        else:
+            st.session_state.filter_sort_by = current_sort
 
         sort_by = st.radio(
             "정렬 방식",
             options=sort_options,
-            index=sort_options.index(current_sort),
             horizontal=True,
+            key="filter_sort_by",
         )
 
         # 개인화가 비활성화되어 있고 사용자가 개인화를 선택하려 하면 안내 메시지
@@ -165,8 +190,27 @@ def render_filter_ui(app: What2EatApp, search_filter: SearchFilter):
         )
 
         if submitted:
-            # 폼 제출 시 세션 상태 업데이트 (카테고리는 폼 외부에서 이미 처리됨)
+            # 폼 제출 시 세션 상태 업데이트 (key를 통해 session_state에서 직접 읽기)
+            # 체크박스 값: True면 거리 제한 없음, False면 거리 제한 사용
+            use_no_distance_limit = st.session_state.get("filter_use_distance_limit", False)
+            use_distance_limit = not use_no_distance_limit
+            radius_km = st.session_state.get("filter_radius_km", 5.0)
+            min_review_count = st.session_state.get("filter_min_review_count", 0)
+            selected_large = st.session_state.get("filter_large_categories", [])
+            selected_middle = st.session_state.get("filter_middle_categories", [])
+            sort_by = st.session_state.get("filter_sort_by", "인기도")
+            
+            # 0이면 None으로 처리 (필터 적용 안 함)
+            if min_review_count == 0:
+                min_review_count = None
+            
+            # 거리 제한 없음인 경우 매우 큰 값으로 설정 (30km)
+            if not use_distance_limit:
+                radius_km = 30.0
+            
+            st.session_state.search_filters["use_distance_limit"] = use_distance_limit
             st.session_state.search_filters["radius_km"] = radius_km
+            st.session_state.search_filters["min_review_count"] = min_review_count
             st.session_state.search_filters["large_categories"] = selected_large
             st.session_state.search_filters["middle_categories"] = selected_middle
             st.session_state.search_filters["sort_by"] = sort_by
@@ -180,7 +224,8 @@ def render_filter_ui(app: What2EatApp, search_filter: SearchFilter):
                     address=st.session_state.address,
                     lat=st.session_state.user_lat,
                     lon=st.session_state.user_lon,
-                    radius=radius_km,
+                    radius=radius_km if use_distance_limit else None,
+                    min_review_count=min_review_count,
                     large_categories=selected_large,
                     middle_categories=selected_middle,
                     sort_by=sort_by,
@@ -218,23 +263,18 @@ def render_restaurant_dataframe(df_results, total_count=None):
 
     # 정렬 기준에 따른 컬럼 헤더 및 표시 정보 결정
     if sort_by == "숨찐맛":
-        col4_label = "숨찐맛 점수"
-        col5_label = "거리"
+        col4_label = "숨찐맛"
     elif sort_by == "개인화":
-        col4_label = "개인화 점수"
-        col5_label = "거리"
+        col4_label = "개인화"
     elif sort_by == "인기도":
-        col4_label = "인기도 점수"
-        col5_label = "거리"
+        col4_label = "인기도"
     elif sort_by == "거리순":
         col4_label = "리뷰 수"
-        col5_label = "거리"
     else:  # 개인화 또는 기본값
         col4_label = "리뷰 수"
-        col5_label = "거리"
 
     # 컬럼 헤더 표시
-    col1, col2, col3, col4, col5, col6 = st.columns([3, 2, 1, 1, 1, 1])
+    col1, col2, col3, col4, col5, col6, col7 = st.columns([3, 2, 1, 1, 1, 1, 1])
     with col1:
         st.write("**음식점명**")
     with col2:
@@ -244,8 +284,10 @@ def render_restaurant_dataframe(df_results, total_count=None):
     with col4:
         st.write(f"**{col4_label}**")
     with col5:
-        st.write(f"**{col5_label}**")
+        st.write("**리뷰 수**")
     with col6:
+        st.write("**거리**")
+    with col7:
         st.write("**보기**")
 
     st.divider()
@@ -258,7 +300,7 @@ def render_restaurant_dataframe(df_results, total_count=None):
         diner_name = row["diner_name"]
         diner_url = f"https://place.map.kakao.com/{diner_idx}"
 
-        col1, col2, col3, col4, col5, col6 = st.columns([3, 2, 1, 1, 1, 1])
+        col1, col2, col3, col4, col5, col6, col7 = st.columns([3, 2, 1, 1, 1, 1, 1])
 
         with col1:
             st.write(f"**{diner_name}**")
@@ -287,18 +329,33 @@ def render_restaurant_dataframe(df_results, total_count=None):
                     st.write(f"{row['personalized_score']:.2f}")
                 else:
                     st.write("-")
-            else:  # 개인화 또는 기본값
-                st.write(
-                    int(row["diner_review_cnt"])
-                    if pd.notna(row["diner_review_cnt"])
-                    else 0
-                )
+            else:  # 거리순 또는 기본값
+                if pd.notna(row["diner_review_cnt"]):
+                    try:
+                        # float로 먼저 변환한 후 int로 변환 (문자열 '9.0' 형태 처리)
+                        review_cnt = int(float(row["diner_review_cnt"]))
+                        st.write(review_cnt)
+                    except (ValueError, TypeError):
+                        st.write(0)
+                else:
+                    st.write(0)
         with col5:
+            # 리뷰 수 항상 표시
+            if pd.notna(row["diner_review_cnt"]):
+                try:
+                    # float로 먼저 변환한 후 int로 변환 (문자열 '9.0' 형태 처리)
+                    review_cnt = int(float(row["diner_review_cnt"]))
+                    st.write(review_cnt)
+                except (ValueError, TypeError):
+                    st.write(0)
+            else:
+                st.write(0)
+        with col6:
             if "distance" in row and pd.notna(row["distance"]):
                 st.write(f"{row['distance']:.1f}km")
             else:
                 st.write("-")
-        with col6:
+        with col7:
             # 버튼 클릭 시 로그 기록 후 링크로 이동
             button_key = f"view_diner_{diner_idx}_{list_idx}"
             if st.button("보기", key=button_key, use_container_width=True):
@@ -390,10 +447,10 @@ def render_restaurant_dataframe(df_results, total_count=None):
                         # 거리값 매핑
                         if (
                             "id" in next_page_results.columns
-                            and "filtered_distance_dict" in st.session_state
+                            and "filtered_distance_id_mapping" in st.session_state
                         ):
                             next_page_results["distance"] = next_page_results["id"].map(
-                                st.session_state.filtered_distance_dict
+                                st.session_state.filtered_distance_id_mapping
                             )
 
                         # 기존 결과에 추가
@@ -454,6 +511,7 @@ def render():
                 radius_km=api_radius_km,  # API 호출 기준으로 30 사용
                 large_categories=filters["large_categories"] or [],
                 middle_categories=filters["middle_categories"] or [],
+                min_review_count=filters.get("min_review_count"),
             )
 
             # 필터 조건이 변경되었는지 확인
@@ -468,20 +526,22 @@ def render():
                     del st.session_state.personalized_all_results
 
                 # 필터링 API 호출 (30km로 고정하여 더 많은 데이터 가져오기)
+                large_cats = filters["large_categories"] if filters["large_categories"] else None
+                middle_cats = filters["middle_categories"] if filters["middle_categories"] else None
+                min_review = filters.get("min_review_count")
+                print(f'[DEBUG] 필터링 요청 - 대분류: {large_cats}, 중분류: {middle_cats}, 최소 리뷰 수: {min_review}, 위도: {st.session_state.user_lat}, 경도: {st.session_state.user_lon}, 반경: {api_radius_km}')
+                
                 diner_ids, diner_idx, distance_dict, distance_dict_idx = (
                     search_filter.get_filtered_restaurants(
                         user_lat=st.session_state.user_lat,
                         user_lon=st.session_state.user_lon,
                         radius_km=api_radius_km,  # 30으로 고정
-                        large_categories=filters["large_categories"]
-                        if filters["large_categories"]
-                        else None,
-                        middle_categories=filters["middle_categories"]
-                        if filters["middle_categories"]
-                        else None,
+                        large_categories=large_cats,
+                        middle_categories=middle_cats,
+                        min_review_count=min_review,
                     )
                 )
-
+                print(f'[DEBUG] 필터링 결과 - diner_ids 개수: {len(diner_ids) if diner_ids else 0}')
                 if diner_ids is not None and len(diner_ids) > 0:
                     # 전체 데이터를 캐시에 저장 (30km 범위의 모든 데이터)
                     st.session_state.filtered_restaurant_ids_all = diner_ids
@@ -628,6 +688,8 @@ def render():
                 df_results = search_filter.sort_restaurants(
                     diner_ids=diner_ids,
                     sort_by=filters["sort_by"],
+                    user_lat=st.session_state.user_lat,
+                    user_lon=st.session_state.user_lon,
                     limit=15,
                     offset=0,
                 )
